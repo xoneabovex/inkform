@@ -1,6 +1,5 @@
 import { Tabs } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Platform } from "react-native";
@@ -15,7 +14,8 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: colors.tint,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.muted,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
@@ -31,8 +31,46 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: "Generate",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="wand.and.stars" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="gallery"
+        options={{
+          title: "Gallery",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="photo.on.rectangle.angled" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="upscale"
+        options={{
+          title: "Upscale",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="arrow.up.forward.square" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="prompts"
+        options={{
+          title: "Prompts",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="text.quote" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="gearshape.fill" color={color} />
+          ),
         }}
       />
     </Tabs>

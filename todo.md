@@ -1,0 +1,34 @@
+# Project TODO
+
+- [x] Dark theme configuration (purple accent brand colors)
+- [x] Tab navigation setup (Generate, Gallery, Upscale, Prompts, Settings)
+- [x] Icon mappings for all tabs
+- [x] Secure storage utility for API keys (cross-platform with web fallback)
+- [x] Settings screen with provider API key inputs
+- [x] Provider/model selection system
+- [x] Civitai API integration (fetch model name + thumbnail)
+- [x] Civitai preview cards in UI
+- [x] Generate screen with prompt/negative prompt inputs
+- [x] Aspect ratio presets selector
+- [x] Batch size selector
+- [x] Dynamic parameter sliders (CFG, Steps, etc.)
+- [x] Replicate API integration (FLUX.2, Qwen, SDXL models)
+- [x] RunPod API integration (custom endpoint polling)
+- [x] Google Vertex AI / Imagen 3 integration
+- [x] Image generation flow with polling and loading states
+- [x] Gallery screen with grid layout
+- [x] Collections system (create, add to, remove from)
+- [x] Image detail view with metadata
+- [x] Upscale screen UI
+- [x] Replicate upscaling integration (Real-ESRGAN, GFPGAN)
+- [x] Save to Camera Roll functionality
+- [x] Prompt history (last 50, AsyncStorage)
+- [x] Prompt bookmarks
+- [x] Prompts screen with History/Bookmarks tabs
+- [x] Toast notifications for success/error
+- [x] Loading states and progress indicators
+- [x] Error handling for API timeouts and rate limits
+- [x] RunPod Python worker (handler.py)
+- [x] RunPod Dockerfile and deployment instructions
+- [x] App logo generation and branding
+- [x] Unit tests for types and Civitai module

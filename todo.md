@@ -52,3 +52,15 @@
 - [x] Add negative prompt preset library with insertable templates (SDXL Quality, Anime Clean, Photorealistic, etc.)
 - [x] Add LoRA trigger word fetch and display from Civitai API when a LoRA is loaded
 - [x] Fix Google Imagen API — switched to generateImages endpoint for Imagen 4/Ultra/Fast, generateContent for Gemini 3.1 Flash Image / Gemini 3 Pro Image / Gemini 2.5 Flash Image; batch capped for Ultra/Pro models
+- [x] Ecosystem accordion menu for model selection (Replicate, Google, Studio/RunPod with SDXL/Pony/Illustrious/NoobAI/Flux/SD1.5 groups)
+- [x] Restructured Advanced Settings — negative prompt, seed, steps, CFG, sampler, clip skip, VAE, hi-res fix, mature content toggle
+- [x] Legacy Civitai Loader for SDXL/Pony/Illustrious/NoobAI — manual Civitai model loader + LoRA stack with weight sliders
+- [x] Auto Civitai routing for open-weight models — auto-populate base model ID, dynamic LoRA stack
+- [x] Image-to-image reference image picker with denoising slider
+- [x] Model-specific parameter logic — SDXL shows clip skip/VAE/hi-res fix; FLUX hides neg prompt/clip skip; managed APIs hide advanced params
+- [x] Fix gallery pinch-to-zoom (proper Gesture.Race for pinch vs double-tap, focal-point aware, bounded pan)
+- [x] Add Copy Prompt button in gallery detail view and fullscreen viewer
+- [x] Add animated splash screen with stylized app logo on boot
+- [x] Add exit confirmation dialog when pressing back to close app (Android BackHandler)
+- [x] Update API modules for new model catalog (full ecosystem with architecture flags)
+- [x] Update RunPod worker for img2img, hi-res fix, VAE selection, mature content

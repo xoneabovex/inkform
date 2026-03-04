@@ -12,8 +12,6 @@ const KEYS = {
   PROMPT_HISTORY: "inkform_prompt_history",
   BOOKMARKS: "inkform_bookmarks",
   SETTINGS: "inkform_settings",
-  CIVITAI_BASE_MODEL: "inkform_civitai_base_model",
-  CIVITAI_LORAS: "inkform_civitai_loras",
   REUSE_SETTINGS: "inkform_reuse_settings",
 };
 
@@ -28,6 +26,37 @@ export async function saveGalleryImage(image: GalleryImage): Promise<void> {
   const images = await getGalleryImages();
   images.unshift(image);
   await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(images));
+}
+
+/** Convenience: create a GalleryImage from generation params and save it */
+export async function saveImageToGallery(params: {
+  uri: string;
+  prompt: string;
+  negativePrompt?: string;
+  provider: ProviderType;
+  model: string;
+  aspectRatio: string;
+  seed?: number;
+  samplingMethod?: string;
+  cfg?: number;
+  steps?: number;
+}): Promise<void> {
+  const image: GalleryImage = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+    uri: params.uri,
+    prompt: params.prompt,
+    negativePrompt: params.negativePrompt,
+    provider: params.provider,
+    model: params.model,
+    aspectRatio: params.aspectRatio,
+    createdAt: Date.now(),
+    collections: [],
+    seed: params.seed,
+    samplingMethod: params.samplingMethod,
+    cfg: params.cfg,
+    steps: params.steps,
+  };
+  await saveGalleryImage(image);
 }
 
 export async function deleteGalleryImage(id: string): Promise<void> {
@@ -71,7 +100,6 @@ export async function deleteCollection(id: string): Promise<void> {
   const collections = await getCollections();
   const filtered = collections.filter((c) => c.id !== id);
   await AsyncStorage.setItem(KEYS.COLLECTIONS, JSON.stringify(filtered));
-  // Also remove collection from all images
   const images = await getGalleryImages();
   const updated = images.map((img) => ({
     ...img,
@@ -138,6 +166,21 @@ export async function addPromptToHistory(
   await AsyncStorage.setItem(KEYS.PROMPT_HISTORY, JSON.stringify(history));
 }
 
+/** Convenience: save prompt from generation params */
+export async function savePromptToHistory(params: {
+  prompt: string;
+  negativePrompt?: string;
+  provider: ProviderType;
+  model: string;
+}): Promise<void> {
+  await addPromptToHistory(
+    params.prompt,
+    params.negativePrompt,
+    params.provider,
+    params.model
+  );
+}
+
 export async function clearPromptHistory(): Promise<void> {
   await AsyncStorage.setItem(KEYS.PROMPT_HISTORY, JSON.stringify([]));
 }
@@ -169,8 +212,6 @@ export async function removeBookmark(id: string): Promise<void> {
 export interface AppSettings {
   defaultProvider: ProviderType;
   defaultAspectRatio: string;
-  civitaiBaseModelId?: string;
-  civitaiLoraIds?: string[];
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -183,6 +224,14 @@ export async function getSettings(): Promise<AppSettings> {
   return data ? { ...DEFAULT_SETTINGS, ...JSON.parse(data) } : DEFAULT_SETTINGS;
 }
 
+export async function saveSettings(
+  settings: Partial<AppSettings>
+): Promise<void> {
+  const current = await getSettings();
+  const updated = { ...current, ...settings };
+  await AsyncStorage.setItem(KEYS.SETTINGS, JSON.stringify(updated));
+}
+
 // ===== Reuse Settings (pre-fill Generate tab from gallery) =====
 
 export interface ReuseSettings {
@@ -190,14 +239,12 @@ export interface ReuseSettings {
   negativePrompt?: string;
   provider: ProviderType;
   modelId: string;
-  aspectRatioValue: string;
+  aspectRatio?: string;
   cfg?: number;
   steps?: number;
   seed?: number;
   samplingMethod?: string;
   clipSkip?: number;
-  qualityBoost?: boolean;
-  civitaiModelInput?: string;
 }
 
 export async function saveReuseSettings(settings: ReuseSettings): Promise<void> {
@@ -211,12 +258,4 @@ export async function getReuseSettings(): Promise<ReuseSettings | null> {
 
 export async function clearReuseSettings(): Promise<void> {
   await AsyncStorage.removeItem(KEYS.REUSE_SETTINGS);
-}
-
-export async function saveSettings(
-  settings: Partial<AppSettings>
-): Promise<void> {
-  const current = await getSettings();
-  const updated = { ...current, ...settings };
-  await AsyncStorage.setItem(KEYS.SETTINGS, JSON.stringify(updated));
 }

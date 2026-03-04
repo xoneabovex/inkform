@@ -55,8 +55,20 @@ export async function generateWithRunPod(
   if (req.clipSkip !== undefined) {
     input.clip_skip = req.clipSkip;
   }
-  if (req.qualityBoost !== undefined) {
-    input.quality_boost = req.qualityBoost;
+  if (req.vae) {
+    input.vae = req.vae;
+  }
+  if (req.hiResFix) {
+    input.hires_fix = true;
+    if (req.hiResUpscaleFactor) input.hires_upscale = req.hiResUpscaleFactor;
+    if (req.hiResSteps) input.hires_steps = req.hiResSteps;
+    if (req.hiResDenoising) input.hires_denoising = req.hiResDenoising;
+  }
+  if (req.matureContent !== undefined) {
+    input.mature_content = req.matureContent;
+  }
+  if (req.denoisingStrength !== undefined) {
+    input.denoising_strength = req.denoisingStrength;
   }
 
   onProgress?.("Submitting to RunPod...");

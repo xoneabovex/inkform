@@ -1,0 +1,6 @@
+Splash screen is showing correctly with:
+- Dark background (#0D0D14)
+- Purple star icon in rounded container with glow
+- "Inkform" title text
+- "AI Image Studio" subtitle
+- Loading spinner at bottom

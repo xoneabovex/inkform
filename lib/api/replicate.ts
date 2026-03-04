@@ -9,25 +9,19 @@ interface ReplicatePrediction {
   error: string | null;
 }
 
-function getAspectRatioString(ar: AspectRatio): string {
-  return ar.value;
-}
-
 function buildReplicateInput(req: GenerationRequest): Record<string, any> {
   const input: Record<string, any> = {
     prompt: req.prompt,
   };
 
-  // Aspect ratio
   const modelId = req.model.replicateId || "";
 
+  // Aspect ratio — FLUX models use string, others use width/height
   if (modelId.includes("flux")) {
-    input.aspect_ratio = getAspectRatioString(req.aspectRatio);
-  } else if (modelId.includes("sdxl")) {
+    input.aspect_ratio = req.aspectRatio.value;
+  } else {
     input.width = req.aspectRatio.width;
     input.height = req.aspectRatio.height;
-  } else if (modelId.includes("qwen")) {
-    input.size = `${req.aspectRatio.width}x${req.aspectRatio.height}`;
   }
 
   // Negative prompt
@@ -49,9 +43,30 @@ function buildReplicateInput(req: GenerationRequest): Record<string, any> {
     input.num_inference_steps = req.steps;
   }
 
+  // Seed
+  if (req.seed !== undefined && req.seed !== -1) {
+    input.seed = req.seed;
+  }
+
   // Batch size
   if (req.batchSize > 1) {
     input.num_outputs = req.batchSize;
+  }
+
+  // Img2img — reference image
+  if (req.referenceImageUri) {
+    // FLUX models use image_prompt or image, others use init_image
+    if (modelId.includes("flux")) {
+      input.image_prompt = req.referenceImageUri;
+      if (req.denoisingStrength !== undefined) {
+        input.prompt_strength = req.denoisingStrength;
+      }
+    } else {
+      input.image = req.referenceImageUri;
+      if (req.denoisingStrength !== undefined) {
+        input.prompt_strength = req.denoisingStrength;
+      }
+    }
   }
 
   return input;
@@ -91,7 +106,6 @@ export async function createReplicatePrediction(
 
   const data: ReplicatePrediction = await response.json();
 
-  // If "Prefer: wait" returned a completed prediction
   if (data.status === "succeeded" && data.output) {
     return data.id;
   }
@@ -204,7 +218,6 @@ export async function upscaleWithReplicate(
     if (output) return output;
   }
 
-  // Need to poll
   const result = await pollReplicatePrediction(token, data.id, onProgress);
   return result[0];
 }

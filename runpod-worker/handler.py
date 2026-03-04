@@ -2,7 +2,8 @@
 Inkform RunPod Serverless Worker
 ---------------------------------
 Dynamically fetches and runs Civitai base models (SDXL, Pony, Illustrious,
-SD 1.5, etc.) with LoRAs using the diffusers library.
+SD 1.5, Flux, etc.) with LoRAs using the diffusers library.
+Supports txt2img and img2img modes, hi-res fix, VAE selection, and mature content.
 
 Network Volume Caching:
   - Models cached at /runpod-volume/models/
@@ -22,14 +23,21 @@ Input Schema:
         "euler", "euler_a", "dpm++_2m_karras", "dpm++_sde_karras",
         "dpm++_2m", "dpm++_sde", "ddim", "lcm", "heun", "lms"
     "clip_skip": int (1-4, default 1),
-    "quality_boost": bool (default false),
     "civitai_model_version_id": str (optional),
     "civitai_loras": list[{"id": str, "weight": float}] (optional),
-    "civitai_token": str (optional, overrides env var)
+    "civitai_token": str (optional, overrides env var),
+    "hires_fix": bool (optional),
+    "hires_upscale": float (optional, default 1.5),
+    "hires_steps": int (optional, default 10),
+    "hires_denoising": float (optional, default 0.5),
+    "vae": str (optional — "default", "sdxl-vae-fp16-fix", "kl-f8-anime2"),
+    "mature_content": bool (optional, default false),
+    "denoising_strength": float (optional, for img2img),
+    "init_image_url": str (optional, URL for img2img reference image)
   }
 
 Output Schema:
-  { "images": list[str] }  # data:image/png;base64,... strings
+  { "images": list[str], "seed": int }  # data:image/png;base64,... strings
 """
 
 import os
@@ -40,9 +48,13 @@ import requests
 import torch
 import runpod
 from pathlib import Path
+from PIL import Image
 from diffusers import (
     StableDiffusionPipeline,
     StableDiffusionXLPipeline,
+    StableDiffusionImg2ImgPipeline,
+    StableDiffusionXLImg2ImgPipeline,
+    AutoencoderKL,
     EulerDiscreteScheduler,
     EulerAncestralDiscreteScheduler,
     DPMSolverMultistepScheduler,
@@ -66,6 +78,7 @@ DEFAULT_MODEL_15 = "runwayml/stable-diffusion-v1-5"
 _pipeline = None
 _current_model_id = None
 _is_xl_model = True
+_img2img_pipeline = None
 
 
 # ===== Scheduler Factory =====
@@ -88,7 +101,6 @@ def apply_scheduler(pipe, method: str):
         method = "euler_a"
     scheduler_cls = SCHEDULER_MAP[method]
     if callable(scheduler_cls) and not isinstance(scheduler_cls, type):
-        # Lambda factory
         pipe.scheduler = scheduler_cls(pipe.scheduler.config)
     else:
         pipe.scheduler = scheduler_cls.from_config(pipe.scheduler.config)
@@ -123,7 +135,7 @@ def get_civitai_download_url(version_id: str, token: str) -> tuple[str, str]:
 
 def detect_is_xl(base_model: str) -> bool:
     """Detect if a model is XL-based from its base model string."""
-    xl_keywords = ["xl", "sdxl", "pony", "illustrious", "noobai", "animagine xl"]
+    xl_keywords = ["xl", "sdxl", "pony", "illustrious", "noobai", "animagine xl", "flux"]
     return any(kw in base_model.lower() for kw in xl_keywords)
 
 
@@ -164,22 +176,36 @@ def download_civitai_file(version_id: str, token: str, is_lora: bool = False) ->
     return cache_file, base_model
 
 
+# ===== Image Helpers =====
+def download_image(url: str) -> Image.Image:
+    """Download an image from URL for img2img."""
+    resp = requests.get(url, timeout=60)
+    resp.raise_for_status()
+    return Image.open(io.BytesIO(resp.content)).convert("RGB")
+
+
 # ===== Pipeline Management =====
-def load_pipeline(model_version_id: str = None, token: str = "", sampling_method: str = "euler_a"):
+def load_pipeline(model_version_id: str = None, token: str = "", sampling_method: str = "euler_a",
+                  vae_name: str = None, img2img: bool = False):
     """Load or reuse the pipeline."""
-    global _pipeline, _current_model_id, _is_xl_model
+    global _pipeline, _current_model_id, _is_xl_model, _img2img_pipeline
 
     model_id = model_version_id or "default_xl"
+    cache_key = f"{model_id}_{vae_name or 'default'}"
 
-    if _pipeline is not None and _current_model_id == model_id:
-        print(f"[Pipeline] Reusing cached pipeline for {model_id}")
+    if _pipeline is not None and _current_model_id == cache_key and not img2img:
+        print(f"[Pipeline] Reusing cached pipeline for {cache_key}")
         apply_scheduler(_pipeline, sampling_method)
         return _pipeline
 
-    # Clear existing pipeline
+    # Clear existing pipelines
     if _pipeline is not None:
         del _pipeline
-        torch.cuda.empty_cache()
+        _pipeline = None
+    if _img2img_pipeline is not None:
+        del _img2img_pipeline
+        _img2img_pipeline = None
+    torch.cuda.empty_cache()
 
     is_xl = True
 
@@ -188,7 +214,11 @@ def load_pipeline(model_version_id: str = None, token: str = "", sampling_method
         is_xl = detect_is_xl(base_model)
         print(f"[Pipeline] Loading custom model from {model_path} (XL={is_xl}, base={base_model})")
 
-        PipelineClass = StableDiffusionXLPipeline if is_xl else StableDiffusionPipeline
+        if img2img:
+            PipelineClass = StableDiffusionXLImg2ImgPipeline if is_xl else StableDiffusionImg2ImgPipeline
+        else:
+            PipelineClass = StableDiffusionXLPipeline if is_xl else StableDiffusionPipeline
+
         pipe = PipelineClass.from_single_file(
             str(model_path),
             torch_dtype=torch.float16,
@@ -196,26 +226,53 @@ def load_pipeline(model_version_id: str = None, token: str = "", sampling_method
         )
     else:
         print(f"[Pipeline] Loading default SDXL model")
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            DEFAULT_MODEL_XL,
-            torch_dtype=torch.float16,
-            use_safetensors=True,
-            variant="fp16",
-        )
+        if img2img:
+            pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                DEFAULT_MODEL_XL,
+                torch_dtype=torch.float16,
+                use_safetensors=True,
+                variant="fp16",
+            )
+        else:
+            pipe = StableDiffusionXLPipeline.from_pretrained(
+                DEFAULT_MODEL_XL,
+                torch_dtype=torch.float16,
+                use_safetensors=True,
+                variant="fp16",
+            )
+
+    # Apply custom VAE
+    if vae_name and vae_name != "default":
+        try:
+            vae_map = {
+                "sdxl-vae-fp16-fix": "madebyollin/sdxl-vae-fp16-fix",
+                "kl-f8-anime2": "hakurei/waifu-diffusion-v1-4",
+            }
+            vae_repo = vae_map.get(vae_name, vae_name)
+            print(f"[VAE] Loading {vae_repo}")
+            vae = AutoencoderKL.from_pretrained(vae_repo, torch_dtype=torch.float16)
+            pipe.vae = vae
+        except Exception as e:
+            print(f"[VAE] Warning: Could not load {vae_name}: {e}")
 
     apply_scheduler(pipe, sampling_method)
     pipe = pipe.to("cuda")
     pipe.enable_vae_slicing()
     pipe.enable_vae_tiling()
 
-    _pipeline = pipe
-    _current_model_id = model_id
+    if img2img:
+        _img2img_pipeline = pipe
+    else:
+        _pipeline = pipe
+    _current_model_id = cache_key
     _is_xl_model = is_xl
     return pipe
 
 
 def apply_loras(pipe, lora_list: list, token: str):
     """Apply LoRA weights. lora_list = [{"id": str, "weight": float}]"""
+    adapter_names = []
+    adapter_weights = []
     for lora_entry in lora_list:
         lora_id = lora_entry.get("id", "")
         weight = float(lora_entry.get("weight", 0.8))
@@ -225,7 +282,11 @@ def apply_loras(pipe, lora_list: list, token: str):
         print(f"[LoRA] Loading {lora_id} (weight={weight}) from {lora_path}")
         adapter_name = f"lora_{lora_id}"
         pipe.load_lora_weights(str(lora_path), adapter_name=adapter_name)
-        pipe.set_adapters([adapter_name], adapter_weights=[weight])
+        adapter_names.append(adapter_name)
+        adapter_weights.append(weight)
+
+    if adapter_names:
+        pipe.set_adapters(adapter_names, adapter_weights=adapter_weights)
 
 
 def apply_clip_skip(pipe, clip_skip: int):
@@ -233,12 +294,49 @@ def apply_clip_skip(pipe, clip_skip: int):
     if clip_skip <= 1:
         return
     try:
-        # For SD 1.5
         if hasattr(pipe, "text_encoder") and hasattr(pipe.text_encoder, "text_model"):
             layers = pipe.text_encoder.text_model.encoder.layers
             pipe.text_encoder.text_model.encoder.layers = layers[:-clip_skip + 1] if clip_skip > 1 else layers
     except Exception as e:
         print(f"[CLIP Skip] Warning: {e}")
+
+
+# ===== Hi-Res Fix =====
+def apply_hires_fix(pipe, images, prompt, negative_prompt, hires_upscale, hires_steps, hires_denoising, generator):
+    """Apply hi-res fix by upscaling then running img2img."""
+    global _is_xl_model
+    try:
+        upscaled = []
+        for img in images:
+            new_w = int(img.width * hires_upscale)
+            new_h = int(img.height * hires_upscale)
+            # Round to 8
+            new_w = (new_w // 8) * 8
+            new_h = (new_h // 8) * 8
+            upscaled.append(img.resize((new_w, new_h), Image.LANCZOS))
+
+        # Create img2img pipeline from the same model
+        if _is_xl_model:
+            i2i_pipe = StableDiffusionXLImg2ImgPipeline(**pipe.components)
+        else:
+            i2i_pipe = StableDiffusionImg2ImgPipeline(**pipe.components)
+
+        result_images = []
+        for up_img in upscaled:
+            result = i2i_pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt or None,
+                image=up_img,
+                strength=hires_denoising,
+                num_inference_steps=hires_steps,
+                generator=generator,
+            )
+            result_images.extend(result.images)
+
+        return result_images
+    except Exception as e:
+        print(f"[Hi-Res Fix] Warning: {e}, returning original images")
+        return images
 
 
 # ===== Main Handler =====
@@ -260,20 +358,30 @@ def handler(job: dict) -> dict:
         seed_val = inp.get("seed", -1)
         sampling_method = inp.get("sampling_method", "euler_a")
         clip_skip = max(1, min(4, int(inp.get("clip_skip", 1))))
-        quality_boost = bool(inp.get("quality_boost", False))
         civitai_model_id = inp.get("civitai_model_version_id")
-        civitai_loras = inp.get("civitai_loras", [])  # [{"id": str, "weight": float}]
+        civitai_loras = inp.get("civitai_loras", [])
         token = get_civitai_token(inp)
+        vae_name = inp.get("vae")
+        hires_fix = bool(inp.get("hires_fix", False))
+        hires_upscale = float(inp.get("hires_upscale", 1.5))
+        hires_steps = int(inp.get("hires_steps", 10))
+        hires_denoising = float(inp.get("hires_denoising", 0.5))
+        denoising_strength = float(inp.get("denoising_strength", 0.75))
+        init_image_url = inp.get("init_image_url")
+        mature_content = bool(inp.get("mature_content", False))
 
         # Seed
         if seed_val is None or seed_val == -1:
             seed_val = random.randint(0, 2**32 - 1)
         generator = torch.Generator("cuda").manual_seed(int(seed_val))
 
-        print(f"[Job] prompt={prompt[:60]}... size={width}x{height} steps={num_steps} cfg={guidance_scale} sampler={sampling_method} seed={seed_val}")
+        is_img2img = bool(init_image_url)
+
+        print(f"[Job] prompt={prompt[:60]}... size={width}x{height} steps={num_steps} cfg={guidance_scale} "
+              f"sampler={sampling_method} seed={seed_val} img2img={is_img2img} hires={hires_fix}")
 
         # Load pipeline
-        pipe = load_pipeline(civitai_model_id, token, sampling_method)
+        pipe = load_pipeline(civitai_model_id, token, sampling_method, vae_name, img2img=is_img2img)
 
         # Apply CLIP skip
         apply_clip_skip(pipe, clip_skip)
@@ -284,30 +392,56 @@ def handler(job: dict) -> dict:
             apply_loras(pipe, civitai_loras, token)
             lora_applied = True
 
-        # Quality boost: add detail-enhancing suffix
-        effective_prompt = prompt
-        if quality_boost:
-            effective_prompt = prompt + ", masterpiece, best quality, highly detailed, sharp focus, 8k"
-            if not negative_prompt:
-                negative_prompt = "lowres, blurry, worst quality, bad anatomy, watermark"
+        # Mature content: if disabled, add safety negative prompt
+        if not mature_content:
+            safety_neg = "nsfw, nude, naked, explicit, pornographic"
+            if negative_prompt:
+                negative_prompt = f"{negative_prompt}, {safety_neg}"
+            else:
+                negative_prompt = safety_neg
 
-        # Generate
-        gen_kwargs = dict(
-            prompt=effective_prompt,
-            negative_prompt=negative_prompt or None,
-            width=width,
-            height=height,
-            num_images_per_prompt=num_images,
-            guidance_scale=guidance_scale,
-            num_inference_steps=num_steps,
-            generator=generator,
-        )
+        if is_img2img:
+            # Img2img mode
+            init_image = download_image(init_image_url)
+            init_image = init_image.resize((width, height), Image.LANCZOS)
 
-        result = pipe(**gen_kwargs)
+            gen_kwargs = dict(
+                prompt=prompt,
+                negative_prompt=negative_prompt or None,
+                image=init_image,
+                strength=denoising_strength,
+                num_images_per_prompt=num_images,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_steps,
+                generator=generator,
+            )
+            result = pipe(**gen_kwargs)
+        else:
+            # Txt2img mode
+            gen_kwargs = dict(
+                prompt=prompt,
+                negative_prompt=negative_prompt or None,
+                width=width,
+                height=height,
+                num_images_per_prompt=num_images,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_steps,
+                generator=generator,
+            )
+            result = pipe(**gen_kwargs)
+
+        images = result.images
+
+        # Hi-res fix (only for txt2img)
+        if hires_fix and not is_img2img:
+            images = apply_hires_fix(
+                pipe, images, prompt, negative_prompt,
+                hires_upscale, hires_steps, hires_denoising, generator
+            )
 
         # Encode as base64
         images_b64 = []
-        for img in result.images:
+        for img in images:
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode("utf-8")

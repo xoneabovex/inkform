@@ -1,9 +1,8 @@
-import type { GenerationRequest, ApiKeys } from "@/lib/types";
+import type { GenerationRequest } from "@/lib/types";
 import { generateWithReplicate } from "./replicate";
 import { generateWithRunPod } from "./runpod";
 import { generateWithGoogleImagen } from "./google-imagen";
 import { getApiKey } from "@/lib/storage/secure-store";
-import { getSettings } from "@/lib/storage/app-storage";
 
 export async function generateImages(
   req: GenerationRequest,
@@ -23,13 +22,12 @@ export async function generateImages(
       if (!apiKey || !endpointId) {
         throw new Error("RunPod API key and Endpoint ID required. Go to Settings to add them.");
       }
-      // civitaiModelId and loraEntries are now passed inline in req
       return generateWithRunPod(
         apiKey,
         endpointId,
         req,
-        undefined, // legacy fallback, now in req.civitaiModelId
-        undefined, // legacy fallback, now in req.loraEntries
+        undefined,
+        undefined,
         civitaiToken || undefined,
         onProgress
       );

@@ -12,9 +12,9 @@
 - [x] Aspect ratio presets selector
 - [x] Batch size selector
 - [x] Dynamic parameter sliders (CFG, Steps, etc.)
-- [x] Replicate API integration (FLUX.2, Qwen, SDXL models)
+- [x] Replicate API integration (FLUX.2, FLUX.1 Schnell, FLUX 1.1 Pro models)
 - [x] RunPod API integration (custom endpoint polling)
-- [x] Google Vertex AI / Imagen 3 integration
+- [x] Google Gemini API / Imagen 3 + 4 integration
 - [x] Image generation flow with polling and loading states
 - [x] Gallery screen with grid layout
 - [x] Collections system (create, add to, remove from)
@@ -35,3 +35,16 @@
 - [x] Fix Replicate model IDs (FLUX.2 Klein → flux-2-klein-4b, added FLUX.1 Schnell + FLUX 1.1 Pro)
 - [x] Fix Google Imagen API (use x-goog-api-key header, added Imagen 4 model, proper aspect ratio mapping)
 - [x] Improve error toast display (truncate long error messages, cleaner parsing)
+- [x] Move Civitai model/LoRA config from Settings to Generate tab (RunPod section inline)
+- [x] Add LoRA fetch UI with Civitai preview (multiple LoRAs with individual weight sliders)
+- [x] Add sampling method selector dropdown (Euler, Euler a, DPM++ 2M Karras, DPM++ SDE Karras, DDIM, LCM, Heun, LMS)
+- [x] Add seed input with manual entry and random seed toggle
+- [x] Add CLIP skip parameter (1-4)
+- [x] Add quality boost toggle (adds detail-enhancing prompt suffix)
+- [x] Fix gallery: tap image to expand fullscreen
+- [x] Fix gallery fullscreen: pinch-to-zoom + double-tap zoom + pan
+- [x] Fix gallery: save-to-camera-roll button in fullscreen viewer and detail view
+- [x] Add share button in gallery fullscreen viewer and detail view
+- [x] Remove SDXL from Replicate model list
+- [x] Update RunPod worker handler: sampling_method, seed, clip_skip, lora weights, SD1.5/Pony/Illustrious support
+- [x] Clean up Settings screen (removed Civitai config, added helpful hints for each key)

@@ -112,6 +112,14 @@ const config: ExpoConfig = {
       },
     ],
     [
+      "expo-media-library",
+      {
+        photosPermission: "Allow Inkform to save generated images to your photo library.",
+        savePhotosPermission: "Allow Inkform to save generated images to your photo library.",
+        isAccessMediaLocationEnabled: true,
+      },
+    ],
+    [
       "expo-build-properties",
       {
         android: {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Text,
   View,
@@ -8,34 +8,25 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from "react-native";
-import { Image } from "expo-image";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
 import {
   saveApiKey,
-  getApiKey,
   getAllApiKeys,
 } from "@/lib/storage/secure-store";
-import {
-  getSettings,
-  saveSettings,
-  type AppSettings,
-} from "@/lib/storage/app-storage";
-import {
-  fetchCivitaiModelVersion,
-  parseCivitaiId,
-} from "@/lib/api/civitai";
-import type { ApiKeys, CivitaiModelPreview } from "@/lib/types";
+import type { ApiKeys } from "@/lib/types";
 
 function SecureInput({
   label,
+  hint,
   value,
   onChangeText,
   placeholder,
   colors,
 }: {
   label: string;
+  hint?: string;
   value: string;
   onChangeText: (text: string) => void;
   placeholder: string;
@@ -45,7 +36,8 @@ function SecureInput({
   return (
     <View style={styles.inputGroup}>
       <Text style={[styles.inputLabel, { color: colors.muted }]}>{label}</Text>
-      <View style={[styles.inputRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {hint && <Text style={[styles.inputHint, { color: colors.muted }]}>{hint}</Text>}
+      <View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: colors.border }]}>
         <TextInput
           style={[styles.textInput, { color: colors.foreground }]}
           value={value}
@@ -55,12 +47,13 @@ function SecureInput({
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="done"
         />
         <TouchableOpacity
           onPress={() => setVisible(!visible)}
           style={styles.eyeButton}
         >
-          <Text style={{ color: colors.muted, fontSize: 12 }}>
+          <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "600" }}>
             {visible ? "HIDE" : "SHOW"}
           </Text>
         </TouchableOpacity>
@@ -69,33 +62,35 @@ function SecureInput({
   );
 }
 
-function CivitaiPreviewCard({
-  preview,
+function PlainInput({
+  label,
+  hint,
+  value,
+  onChangeText,
+  placeholder,
   colors,
 }: {
-  preview: CivitaiModelPreview;
+  label: string;
+  hint?: string;
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder: string;
   colors: any;
 }) {
   return (
-    <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      {preview.thumbnailUrl && (
-        <Image
-          source={{ uri: preview.thumbnailUrl }}
-          style={styles.previewImage}
-          contentFit="cover"
-          transition={200}
-        />
-      )}
-      <View style={styles.previewInfo}>
-        <Text style={[styles.previewName, { color: colors.foreground }]} numberOfLines={2}>
-          {preview.name}
-        </Text>
-        {preview.baseModel && (
-          <Text style={[styles.previewBase, { color: colors.muted }]}>
-            Base: {preview.baseModel}
-          </Text>
-        )}
-      </View>
+    <View style={styles.inputGroup}>
+      <Text style={[styles.inputLabel, { color: colors.muted }]}>{label}</Text>
+      {hint && <Text style={[styles.inputHint, { color: colors.muted }]}>{hint}</Text>}
+      <TextInput
+        style={[styles.singleInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.muted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="done"
+      />
     </View>
   );
 }
@@ -105,14 +100,6 @@ export default function SettingsScreen() {
   const { showToast } = useToast();
 
   const [keys, setKeys] = useState<ApiKeys>({});
-  const [settings, setSettingsState] = useState<AppSettings>({
-    defaultProvider: "replicate",
-    defaultAspectRatio: "1:1",
-  });
-  const [civitaiModelInput, setCivitaiModelInput] = useState("");
-  const [civitaiLoraInput, setCivitaiLoraInput] = useState("");
-  const [baseModelPreview, setBaseModelPreview] = useState<CivitaiModelPreview | null>(null);
-  const [loraPreview, setLoraPreview] = useState<CivitaiModelPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -123,13 +110,8 @@ export default function SettingsScreen() {
   const loadData = async () => {
     try {
       const apiKeys = await getAllApiKeys();
-      const appSettings = await getSettings();
       setKeys(apiKeys);
-      setSettingsState(appSettings);
-      if (appSettings.civitaiBaseModelId) {
-        setCivitaiModelInput(appSettings.civitaiBaseModelId);
-      }
-    } catch (e) {
+    } catch {
       showToast("Failed to load settings", "error");
     } finally {
       setLoading(false);
@@ -139,43 +121,22 @@ export default function SettingsScreen() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Save API keys
-      if (keys.runpodApiKey !== undefined) await saveApiKey("runpodApiKey", keys.runpodApiKey);
-      if (keys.runpodEndpointId !== undefined) await saveApiKey("runpodEndpointId", keys.runpodEndpointId);
-      if (keys.civitaiApiToken !== undefined) await saveApiKey("civitaiApiToken", keys.civitaiApiToken);
-      if (keys.replicateApiToken !== undefined) await saveApiKey("replicateApiToken", keys.replicateApiToken);
-      if (keys.googleApiKey !== undefined) await saveApiKey("googleApiKey", keys.googleApiKey);
-
-      // Save settings
-      await saveSettings({
-        ...settings,
-        civitaiBaseModelId: civitaiModelInput || undefined,
-      });
+      if (keys.replicateApiToken !== undefined)
+        await saveApiKey("replicateApiToken", keys.replicateApiToken);
+      if (keys.googleApiKey !== undefined)
+        await saveApiKey("googleApiKey", keys.googleApiKey);
+      if (keys.runpodApiKey !== undefined)
+        await saveApiKey("runpodApiKey", keys.runpodApiKey);
+      if (keys.runpodEndpointId !== undefined)
+        await saveApiKey("runpodEndpointId", keys.runpodEndpointId);
+      if (keys.civitaiApiToken !== undefined)
+        await saveApiKey("civitaiApiToken", keys.civitaiApiToken);
 
       showToast("Settings saved", "success");
-    } catch (e) {
+    } catch {
       showToast("Failed to save settings", "error");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const fetchCivitaiPreview = async (input: string, type: "base" | "lora") => {
-    const id = parseCivitaiId(input);
-    if (!id) {
-      showToast("Invalid Civitai ID or URL", "error");
-      return;
-    }
-    try {
-      const preview = await fetchCivitaiModelVersion(id, keys.civitaiApiToken);
-      if (preview) {
-        if (type === "base") setBaseModelPreview(preview);
-        else setLoraPreview(preview);
-      } else {
-        showToast("Model not found on Civitai", "error");
-      }
-    } catch (e) {
-      showToast("Failed to fetch Civitai model info", "error");
     }
   };
 
@@ -192,14 +153,22 @@ export default function SettingsScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <Text style={[styles.screenTitle, { color: colors.foreground }]}>Settings</Text>
+        <Text style={[styles.screenSubtitle, { color: colors.muted }]}>
+          API keys are stored securely on your device.
+        </Text>
 
-        {/* Replicate Section */}
+        {/* Replicate */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Replicate</Text>
+          <Text style={[styles.sectionDesc, { color: colors.muted }]}>
+            Used for FLUX.2, FLUX.1 Schnell, and other Replicate-hosted models.
+          </Text>
           <SecureInput
-            label="API Token"
+            label="API TOKEN"
+            hint="Get yours at replicate.com/account/api-tokens"
             value={keys.replicateApiToken || ""}
             onChangeText={(t) => setKeys((k) => ({ ...k, replicateApiToken: t }))}
             placeholder="r8_..."
@@ -207,11 +176,15 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* Google Section */}
+        {/* Google Gemini */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Google (Gemini API)</Text>
+          <Text style={[styles.sectionDesc, { color: colors.muted }]}>
+            Used for Imagen 3 and Imagen 4 image generation.
+          </Text>
           <SecureInput
-            label="API Key"
+            label="API KEY"
+            hint="Get yours at aistudio.google.com/apikey"
             value={keys.googleApiKey || ""}
             onChangeText={(t) => setKeys((k) => ({ ...k, googleApiKey: t }))}
             placeholder="AIza..."
@@ -219,73 +192,36 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* RunPod Section */}
+        {/* RunPod */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>RunPod Custom</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>RunPod</Text>
+          <Text style={[styles.sectionDesc, { color: colors.muted }]}>
+            Used for custom Civitai models and LoRAs via your serverless endpoint. Configure models and LoRAs in the Generate tab when RunPod is selected.
+          </Text>
           <SecureInput
-            label="RunPod API Key"
+            label="RUNPOD API KEY"
+            hint="Get yours at runpod.io/console/user/settings → API Keys"
             value={keys.runpodApiKey || ""}
             onChangeText={(t) => setKeys((k) => ({ ...k, runpodApiKey: t }))}
             placeholder="rp_..."
             colors={colors}
           />
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.muted }]}>Endpoint ID</Text>
-            <TextInput
-              style={[styles.singleInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
-              value={keys.runpodEndpointId || ""}
-              onChangeText={(t) => setKeys((k) => ({ ...k, runpodEndpointId: t }))}
-              placeholder="abc123..."
-              placeholderTextColor={colors.muted}
-              autoCapitalize="none"
-            />
-          </View>
-          <SecureInput
-            label="Civitai API Token"
-            value={keys.civitaiApiToken || ""}
-            onChangeText={(t) => setKeys((k) => ({ ...k, civitaiApiToken: t }))}
-            placeholder="Civitai token..."
+          <PlainInput
+            label="ENDPOINT ID"
+            hint="Found in your serverless endpoint dashboard"
+            value={keys.runpodEndpointId || ""}
+            onChangeText={(t) => setKeys((k) => ({ ...k, runpodEndpointId: t }))}
+            placeholder="abc1234xyz..."
             colors={colors}
           />
-
-          {/* Civitai Base Model */}
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.muted }]}>Civitai Base Model ID/URL</Text>
-            <View style={[styles.inputRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <TextInput
-                style={[styles.textInput, { color: colors.foreground }]}
-                value={civitaiModelInput}
-                onChangeText={setCivitaiModelInput}
-                placeholder="e.g., 128713 or civitai.com/models/..."
-                placeholderTextColor={colors.muted}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity
-                onPress={() => fetchCivitaiPreview(civitaiModelInput, "base")}
-                style={[styles.fetchButton, { backgroundColor: colors.primary }]}
-              >
-                <Text style={styles.fetchButtonText}>Fetch</Text>
-              </TouchableOpacity>
-            </View>
-            {baseModelPreview && (
-              <CivitaiPreviewCard preview={baseModelPreview} colors={colors} />
-            )}
-          </View>
-
-          {/* Civitai LoRA */}
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.muted }]}>LoRA IDs/URLs (one per line)</Text>
-            <TextInput
-              style={[styles.multilineInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
-              value={civitaiLoraInput}
-              onChangeText={setCivitaiLoraInput}
-              placeholder="Enter LoRA IDs, one per line"
-              placeholderTextColor={colors.muted}
-              multiline
-              numberOfLines={3}
-              autoCapitalize="none"
-            />
-          </View>
+          <SecureInput
+            label="CIVITAI API TOKEN"
+            hint="Optional — needed for private models. Get at civitai.com/user/account"
+            value={keys.civitaiApiToken || ""}
+            onChangeText={(t) => setKeys((k) => ({ ...k, civitaiApiToken: t }))}
+            placeholder="civitai_..."
+            colors={colors}
+          />
         </View>
 
         {/* Save Button */}
@@ -301,7 +237,7 @@ export default function SettingsScreen() {
           )}
         </TouchableOpacity>
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 60 }} />
       </ScrollView>
     </ScreenContainer>
   );
@@ -316,7 +252,12 @@ const styles = StyleSheet.create({
   screenTitle: {
     fontSize: 28,
     fontWeight: "700",
+    marginBottom: 4,
+  },
+  screenSubtitle: {
+    fontSize: 14,
     marginBottom: 20,
+    lineHeight: 20,
   },
   section: {
     borderRadius: 14,
@@ -325,19 +266,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "600",
+    marginBottom: 4,
+  },
+  sectionDesc: {
+    fontSize: 13,
+    lineHeight: 18,
     marginBottom: 14,
   },
   inputGroup: {
     marginBottom: 14,
   },
   inputLabel: {
-    fontSize: 13,
-    fontWeight: "500",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.8,
+    marginBottom: 3,
+  },
+  inputHint: {
+    fontSize: 11,
     marginBottom: 6,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    lineHeight: 16,
   },
   inputRow: {
     flexDirection: "row",
@@ -350,61 +300,18 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 14,
   },
   singleInput: {
     borderRadius: 10,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
-  },
-  multilineInput: {
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    minHeight: 80,
-    textAlignVertical: "top",
+    fontSize: 14,
   },
   eyeButton: {
     paddingHorizontal: 12,
     paddingVertical: 10,
-  },
-  fetchButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 0,
-  },
-  fetchButtonText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  previewCard: {
-    flexDirection: "row",
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 10,
-    overflow: "hidden",
-  },
-  previewImage: {
-    width: 72,
-    height: 72,
-  },
-  previewInfo: {
-    flex: 1,
-    padding: 10,
-    justifyContent: "center",
-  },
-  previewName: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  previewBase: {
-    fontSize: 12,
-    marginTop: 4,
   },
   saveButton: {
     borderRadius: 12,

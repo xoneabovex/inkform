@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   Text,
   View,
@@ -12,12 +12,22 @@ import {
   StyleSheet,
   Alert,
   Platform,
+  Share,
 } from "react-native";
 import { Image } from "expo-image";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from "react-native-reanimated";
+import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   getGalleryImages,
   deleteGalleryImage,
@@ -29,10 +39,169 @@ import {
 import type { GalleryImage, Collection } from "@/lib/types";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
+const SCREEN_HEIGHT = Dimensions.get("window").height;
 const NUM_COLUMNS = 3;
 const GAP = 3;
 const ITEM_SIZE = (SCREEN_WIDTH - GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS;
 
+// ===== Pinch-to-zoom fullscreen viewer =====
+function FullscreenViewer({
+  uri,
+  onClose,
+  onSave,
+  onShare,
+  colors,
+}: {
+  uri: string;
+  onClose: () => void;
+  onSave: () => void;
+  onShare: () => void;
+  colors: any;
+}) {
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const pinchGesture = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = Math.max(1, Math.min(5, savedScale.value * e.scale));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value < 1.05) {
+        scale.value = withTiming(1);
+        savedScale.value = 1;
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      if (savedScale.value > 1) {
+        translateX.value = savedTranslateX.value + e.translationX;
+        translateY.value = savedTranslateY.value + e.translationY;
+      }
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (savedScale.value > 1) {
+        scale.value = withTiming(1);
+        savedScale.value = 1;
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        scale.value = withTiming(2.5);
+        savedScale.value = 2.5;
+      }
+    });
+
+  const composed = Gesture.Simultaneous(pinchGesture, panGesture, doubleTapGesture);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <Modal visible animationType="fade" transparent statusBarTranslucent>
+      <View style={viewerStyles.overlay}>
+        {/* Top bar */}
+        <View style={viewerStyles.topBar}>
+          <TouchableOpacity onPress={onClose} style={viewerStyles.topBtn}>
+            <Text style={viewerStyles.topBtnText}>✕</Text>
+          </TouchableOpacity>
+          <View style={viewerStyles.topActions}>
+            <TouchableOpacity onPress={onShare} style={viewerStyles.topBtn}>
+              <Text style={viewerStyles.topBtnText}>⬆</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onSave} style={[viewerStyles.topBtn, { backgroundColor: colors.primary }]}>
+              <Text style={viewerStyles.topBtnText}>⬇ Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Zoomable image */}
+        <GestureDetector gesture={composed}>
+          <Animated.View style={[viewerStyles.imageContainer, animatedStyle]}>
+            <Image
+              source={{ uri }}
+              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+              contentFit="contain"
+            />
+          </Animated.View>
+        </GestureDetector>
+
+        <Text style={viewerStyles.hint}>Pinch to zoom · Double-tap to zoom in/out</Text>
+      </View>
+    </Modal>
+  );
+}
+
+const viewerStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.97)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topBar: {
+    position: "absolute",
+    top: 52,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    zIndex: 10,
+  },
+  topActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  topBtn: {
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  topBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  imageContainer: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hint: {
+    position: "absolute",
+    bottom: 48,
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 12,
+  },
+});
+
+// ===== Main Gallery Screen =====
 export default function GalleryScreen() {
   const colors = useColors();
   const { showToast } = useToast();
@@ -42,6 +211,8 @@ export default function GalleryScreen() {
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showFullscreen, setShowFullscreen] = useState(false);
+  const [fullscreenUri, setFullscreenUri] = useState<string | null>(null);
   const [showCollectionModal, setShowCollectionModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -54,13 +225,10 @@ export default function GalleryScreen() {
 
   const loadData = async () => {
     try {
-      const [imgs, cols] = await Promise.all([
-        getGalleryImages(),
-        getCollections(),
-      ]);
+      const [imgs, cols] = await Promise.all([getGalleryImages(), getCollections()]);
       setImages(imgs);
       setCollections(cols);
-    } catch (e) {
+    } catch {
       showToast("Failed to load gallery", "error");
     } finally {
       setLoading(false);
@@ -77,7 +245,7 @@ export default function GalleryScreen() {
       setImages((prev) => prev.filter((img) => img.id !== id));
       setShowDetail(false);
       showToast("Image deleted", "info");
-    } catch (e) {
+    } catch {
       showToast("Failed to delete image", "error");
     }
   };
@@ -89,7 +257,7 @@ export default function GalleryScreen() {
       setCollections((prev) => [...prev, col]);
       setNewCollectionName("");
       showToast("Collection created", "success");
-    } catch (e) {
+    } catch {
       showToast("Failed to create collection", "error");
     }
   };
@@ -99,14 +267,67 @@ export default function GalleryScreen() {
       await addImageToCollection(imageId, collectionId);
       await loadData();
       showToast("Added to collection", "success");
-    } catch (e) {
+    } catch {
       showToast("Failed to add to collection", "error");
     }
   };
 
+  const handleSaveToGallery = async (uri: string) => {
+    if (Platform.OS === "web") {
+      showToast("Save not supported on web", "warning");
+      return;
+    }
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        showToast("Camera roll permission denied", "error");
+        return;
+      }
+
+      let localUri = uri;
+      // If it's a remote URL, download it first
+      if (uri.startsWith("http")) {
+        const filename = `inkform_${Date.now()}.jpg`;
+        const dest = FileSystem.cacheDirectory + filename;
+        const { uri: downloaded } = await FileSystem.downloadAsync(uri, dest);
+        localUri = downloaded;
+      }
+
+      await MediaLibrary.saveToLibraryAsync(localUri);
+      showToast("Saved to camera roll", "success");
+    } catch (e: any) {
+      showToast("Failed to save: " + (e.message || "unknown error"), "error");
+    }
+  };
+
+  const handleShare = async (uri: string) => {
+    try {
+      if (Platform.OS === "web") {
+        showToast("Sharing not supported on web", "warning");
+        return;
+      }
+      let localUri = uri;
+      if (uri.startsWith("http")) {
+        const filename = `inkform_share_${Date.now()}.jpg`;
+        const dest = FileSystem.cacheDirectory + filename;
+        const { uri: downloaded } = await FileSystem.downloadAsync(uri, dest);
+        localUri = downloaded;
+      }
+      await Share.share({ url: localUri, message: "Generated with Inkform" });
+    } catch {
+      showToast("Failed to share image", "error");
+    }
+  };
+
+  const openFullscreen = (uri: string) => {
+    setFullscreenUri(uri);
+    setShowFullscreen(true);
+  };
+
   const renderImageItem = ({ item }: { item: GalleryImage }) => (
     <TouchableOpacity
-      onPress={() => {
+      onPress={() => openFullscreen(item.uri)}
+      onLongPress={() => {
         setSelectedImage(item);
         setShowDetail(true);
       }}
@@ -171,13 +392,7 @@ export default function GalleryScreen() {
               },
             ]}
           >
-            <Text
-              style={{
-                color: selectedCollection === col.id ? "#fff" : colors.foreground,
-                fontSize: 13,
-                fontWeight: "600",
-              }}
-            >
+            <Text style={{ color: selectedCollection === col.id ? "#fff" : colors.foreground, fontSize: 13, fontWeight: "600" }}>
               {col.name}
             </Text>
           </TouchableOpacity>
@@ -189,6 +404,13 @@ export default function GalleryScreen() {
           <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "600" }}>+ New</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Tap hint */}
+      {filteredImages.length > 0 && (
+        <Text style={[styles.tapHint, { color: colors.muted }]}>
+          Tap to view · Long press for details & collections
+        </Text>
+      )}
 
       {/* Image Grid */}
       {filteredImages.length === 0 ? (
@@ -209,7 +431,18 @@ export default function GalleryScreen() {
         />
       )}
 
-      {/* Image Detail Modal */}
+      {/* Fullscreen Viewer */}
+      {showFullscreen && fullscreenUri && (
+        <FullscreenViewer
+          uri={fullscreenUri}
+          onClose={() => { setShowFullscreen(false); setFullscreenUri(null); }}
+          onSave={() => handleSaveToGallery(fullscreenUri)}
+          onShare={() => handleShare(fullscreenUri)}
+          colors={colors}
+        />
+      )}
+
+      {/* Image Detail Modal (long-press) */}
       <Modal visible={showDetail} animationType="slide" transparent>
         <View style={[styles.modalOverlay, { backgroundColor: colors.background + "F5" }]}>
           {selectedImage && (
@@ -218,29 +451,53 @@ export default function GalleryScreen() {
                 <TouchableOpacity onPress={() => setShowDetail(false)}>
                   <Text style={[styles.closeText, { color: colors.primary }]}>Close</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (Platform.OS === "web") {
-                      handleDelete(selectedImage.id);
-                    } else {
-                      Alert.alert("Delete Image", "Are you sure?", [
-                        { text: "Cancel", style: "cancel" },
-                        { text: "Delete", style: "destructive", onPress: () => handleDelete(selectedImage.id) },
-                      ]);
-                    }
-                  }}
-                >
-                  <Text style={[styles.deleteText, { color: colors.error }]}>Delete</Text>
-                </TouchableOpacity>
+                <View style={styles.detailHeaderActions}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowDetail(false);
+                      openFullscreen(selectedImage.uri);
+                    }}
+                    style={[styles.detailActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  >
+                    <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>⛶ Expand</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleSaveToGallery(selectedImage.uri)}
+                    style={[styles.detailActionBtn, { backgroundColor: colors.primary }]}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>⬇ Save</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (Platform.OS === "web") {
+                        handleDelete(selectedImage.id);
+                      } else {
+                        Alert.alert("Delete Image", "Are you sure?", [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Delete", style: "destructive", onPress: () => handleDelete(selectedImage.id) },
+                        ]);
+                      }
+                    }}
+                  >
+                    <Text style={[styles.deleteText, { color: colors.error }]}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false}>
-                <Image
-                  source={{ uri: selectedImage.uri }}
-                  style={[styles.detailImage, { width: SCREEN_WIDTH - 32 }]}
-                  contentFit="contain"
-                  transition={300}
-                />
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowDetail(false);
+                    openFullscreen(selectedImage.uri);
+                  }}
+                >
+                  <Image
+                    source={{ uri: selectedImage.uri }}
+                    style={[styles.detailImage, { width: SCREEN_WIDTH - 32 }]}
+                    contentFit="contain"
+                    transition={300}
+                  />
+                </TouchableOpacity>
 
                 <View style={[styles.metadataCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <Text style={[styles.metaLabel, { color: colors.muted }]}>PROMPT</Text>
@@ -272,6 +529,14 @@ export default function GalleryScreen() {
                     </View>
                   </View>
                 </View>
+
+                {/* Share button */}
+                <TouchableOpacity
+                  onPress={() => handleShare(selectedImage.uri)}
+                  style={[styles.shareBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                >
+                  <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>⬆ Share Image</Text>
+                </TouchableOpacity>
 
                 {/* Add to Collection */}
                 {collections.length > 0 && (
@@ -313,9 +578,7 @@ export default function GalleryScreen() {
       <Modal visible={showCollectionModal} animationType="fade" transparent>
         <View style={styles.collectionModalOverlay}>
           <View style={[styles.collectionModalContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.collectionModalTitle, { color: colors.foreground }]}>
-              New Collection
-            </Text>
+            <Text style={[styles.collectionModalTitle, { color: colors.foreground }]}>New Collection</Text>
             <TextInput
               style={[styles.collectionInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
               value={newCollectionName}
@@ -323,22 +586,21 @@ export default function GalleryScreen() {
               placeholder="Collection name"
               placeholderTextColor={colors.muted}
               autoFocus
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                handleCreateCollection();
+                setShowCollectionModal(false);
+              }}
             />
             <View style={styles.collectionModalButtons}>
               <TouchableOpacity
-                onPress={() => {
-                  setShowCollectionModal(false);
-                  setNewCollectionName("");
-                }}
+                onPress={() => { setShowCollectionModal(false); setNewCollectionName(""); }}
                 style={[styles.collectionModalBtn, { borderColor: colors.border }]}
               >
                 <Text style={{ color: colors.muted }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => {
-                  handleCreateCollection();
-                  setShowCollectionModal(false);
-                }}
+                onPress={() => { handleCreateCollection(); setShowCollectionModal(false); }}
                 style={[styles.collectionModalBtn, { backgroundColor: colors.primary }]}
               >
                 <Text style={{ color: "#fff", fontWeight: "600" }}>Create</Text>
@@ -354,10 +616,11 @@ export default function GalleryScreen() {
 const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "baseline",
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   screenTitle: {
     fontSize: 28,
@@ -368,58 +631,77 @@ const styles = StyleSheet.create({
   },
   collectionScroll: {
     maxHeight: 44,
-    marginTop: 12,
   },
   collectionScrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     gap: 8,
+    alignItems: "center",
   },
   collectionPill: {
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    marginRight: 8,
   },
-  emptyState: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-  },
-  emptyText: {
-    fontSize: 15,
+  tapHint: {
+    fontSize: 11,
+    textAlign: "center",
+    paddingVertical: 6,
   },
   gridContent: {
-    padding: GAP,
-    paddingTop: 12,
+    paddingHorizontal: GAP,
+    paddingTop: GAP,
   },
   gridRow: {
     gap: GAP,
+    marginBottom: GAP,
   },
   gridItem: {
     width: ITEM_SIZE,
     height: ITEM_SIZE,
     borderRadius: 4,
     overflow: "hidden",
-    marginBottom: GAP,
   },
   gridImage: {
     width: "100%",
     height: "100%",
   },
+  emptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    textAlign: "center",
+    lineHeight: 24,
+  },
+  // Detail modal
   modalOverlay: {
     flex: 1,
   },
   detailContainer: {
     flex: 1,
-    paddingTop: 50,
+    paddingTop: 60,
+    paddingHorizontal: 16,
   },
   detailHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  detailHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  detailActionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
   },
   closeText: {
     fontSize: 16,
@@ -430,15 +712,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   detailImage: {
-    height: 350,
+    height: 320,
     borderRadius: 14,
-    alignSelf: "center",
+    marginBottom: 12,
   },
   metadataCard: {
-    margin: 16,
     borderRadius: 14,
     borderWidth: 1,
     padding: 14,
+    marginBottom: 12,
   },
   metaLabel: {
     fontSize: 11,
@@ -453,7 +735,7 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: "row",
     marginTop: 12,
-    gap: 16,
+    gap: 12,
   },
   metaItem: {
     flex: 1,
@@ -461,6 +743,13 @@ const styles = StyleSheet.create({
   metaSmall: {
     fontSize: 13,
     fontWeight: "500",
+  },
+  shareBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginBottom: 12,
   },
   collectionChips: {
     flexDirection: "row",
@@ -476,14 +765,13 @@ const styles = StyleSheet.create({
   },
   collectionModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
     alignItems: "center",
-    padding: 32,
+    justifyContent: "center",
+    padding: 24,
   },
   collectionModalContent: {
     width: "100%",
-    maxWidth: 340,
     borderRadius: 16,
     borderWidth: 1,
     padding: 20,
@@ -499,7 +787,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   collectionModalButtons: {
     flexDirection: "row",
@@ -507,10 +795,9 @@ const styles = StyleSheet.create({
   },
   collectionModalBtn: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "transparent",
     alignItems: "center",
   },
 });

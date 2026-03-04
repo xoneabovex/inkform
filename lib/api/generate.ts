@@ -23,13 +23,13 @@ export async function generateImages(
       if (!apiKey || !endpointId) {
         throw new Error("RunPod API key and Endpoint ID required. Go to Settings to add them.");
       }
-      const settings = await getSettings();
+      // civitaiModelId and loraEntries are now passed inline in req
       return generateWithRunPod(
         apiKey,
         endpointId,
         req,
-        settings.civitaiBaseModelId,
-        settings.civitaiLoraIds,
+        undefined, // legacy fallback, now in req.civitaiModelId
+        undefined, // legacy fallback, now in req.loraEntries
         civitaiToken || undefined,
         onProgress
       );

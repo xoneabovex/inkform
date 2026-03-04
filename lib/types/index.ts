@@ -79,19 +79,6 @@ export const REPLICATE_MODELS: ModelInfo[] = [
     supportsSteps: false,
   },
 
-  {
-    id: "sdxl",
-    name: "SDXL",
-    provider: "replicate",
-    replicateId: "stability-ai/sdxl",
-    supportsNegativePrompt: true,
-    supportsCfg: true,
-    supportsSteps: true,
-    cfgRange: [1, 20],
-    stepsRange: [1, 50],
-    defaultCfg: 7,
-    defaultSteps: 30,
-  },
 ];
 
 export const GOOGLE_MODELS: ModelInfo[] = [
@@ -121,10 +108,35 @@ export const RUNPOD_MODEL: ModelInfo = {
   supportsCfg: true,
   supportsSteps: true,
   cfgRange: [1, 30],
-  stepsRange: [1, 100],
+  stepsRange: [1, 150],
   defaultCfg: 7,
   defaultSteps: 30,
 };
+
+// ===== Sampling Methods =====
+
+export const SAMPLING_METHODS = [
+  { id: "euler", label: "Euler" },
+  { id: "euler_a", label: "Euler a" },
+  { id: "dpm++_2m_karras", label: "DPM++ 2M Karras" },
+  { id: "dpm++_sde_karras", label: "DPM++ SDE Karras" },
+  { id: "dpm++_2m", label: "DPM++ 2M" },
+  { id: "dpm++_sde", label: "DPM++ SDE" },
+  { id: "ddim", label: "DDIM" },
+  { id: "lcm", label: "LCM" },
+  { id: "heun", label: "Heun" },
+  { id: "lms", label: "LMS" },
+] as const;
+
+export type SamplingMethodId = typeof SAMPLING_METHODS[number]["id"];
+
+// ===== LoRA Types =====
+
+export interface LoraEntry {
+  id: string; // Civitai version ID
+  weight: number; // 0.0 to 2.0
+  preview: CivitaiModelPreview | null;
+}
 
 // ===== Aspect Ratio =====
 
@@ -202,6 +214,12 @@ export interface GenerationRequest {
   batchSize: number;
   cfg?: number;
   steps?: number;
+  seed?: number;
+  samplingMethod?: SamplingMethodId;
+  clipSkip?: number;
+  qualityBoost?: boolean;
+  loraEntries?: LoraEntry[];
+  civitaiModelId?: string;
   extraParams?: Record<string, any>;
 }
 

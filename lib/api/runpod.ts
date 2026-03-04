@@ -30,14 +30,33 @@ export async function generateWithRunPod(
     num_inference_steps: req.steps ?? 30,
   };
 
-  if (civitaiModelId) {
-    input.civitai_model_version_id = civitaiModelId;
+  // Civitai model — prefer inline req.civitaiModelId, fallback to passed arg
+  const effectiveModelId = req.civitaiModelId || civitaiModelId;
+  if (effectiveModelId) {
+    input.civitai_model_version_id = effectiveModelId;
   }
-  if (civitaiLoraIds && civitaiLoraIds.length > 0) {
-    input.civitai_lora_ids = civitaiLoraIds;
+
+  // LoRAs — pass as [{id, weight}] objects matching the handler schema
+  if (req.loraEntries && req.loraEntries.length > 0) {
+    input.civitai_loras = req.loraEntries.map((l) => ({ id: l.id, weight: l.weight }));
+  } else if (civitaiLoraIds && civitaiLoraIds.length > 0) {
+    input.civitai_loras = civitaiLoraIds.map((id) => ({ id, weight: 0.8 }));
   }
+
   if (civitaiToken) {
     input.civitai_token = civitaiToken;
+  }
+  if (req.seed !== undefined) {
+    input.seed = req.seed;
+  }
+  if (req.samplingMethod) {
+    input.sampling_method = req.samplingMethod;
+  }
+  if (req.clipSkip !== undefined) {
+    input.clip_skip = req.clipSkip;
+  }
+  if (req.qualityBoost !== undefined) {
+    input.quality_boost = req.qualityBoost;
   }
 
   onProgress?.("Submitting to RunPod...");

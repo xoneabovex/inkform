@@ -29,9 +29,11 @@ describe("Types and Constants", () => {
   });
 
   it("should have Google Imagen models", () => {
-    expect(GOOGLE_MODELS.length).toBeGreaterThanOrEqual(1);
+    expect(GOOGLE_MODELS.length).toBeGreaterThanOrEqual(3);
     const ids = GOOGLE_MODELS.map((m) => m.id);
-    expect(ids).toContain("imagen-3");
+    expect(ids).toContain("imagen-4");
+    expect(ids).toContain("imagen-4-ultra");
+    expect(ids).toContain("gemini-3-flash-image");
     expect(GOOGLE_MODELS[0].provider).toBe("google");
   });
 

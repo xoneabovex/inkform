@@ -390,13 +390,16 @@ export default function GenerateScreen() {
         ? parseInt(seed.trim(), 10)
         : undefined;
 
+      const effectiveMaxBatch = selectedModel.extraParams?.maxBatch ?? 4;
+      const effectiveBatchSize = Math.min(batchSize, effectiveMaxBatch);
+
       const request: GenerationRequest = {
         provider,
         model: selectedModel,
         prompt: prompt.trim(),
         negativePrompt: negativePrompt.trim() || undefined,
         aspectRatio,
-        batchSize,
+        batchSize: effectiveBatchSize,
         cfg: selectedModel.supportsCfg ? cfg : undefined,
         steps: selectedModel.supportsSteps ? steps : undefined,
         seed: effectiveSeed,
@@ -737,29 +740,39 @@ export default function GenerateScreen() {
         {/* Batch Size */}
         <View style={styles.paramSection}>
           <Text style={[styles.fieldLabel, { color: colors.muted }]}>BATCH SIZE</Text>
+          {selectedModel.extraParams?.maxBatch === 1 && (
+            <Text style={[styles.fieldLabel, { color: colors.warning, fontSize: 11, marginBottom: 6 }]}>
+              This model only supports 1 image at a time.
+            </Text>
+          )}
           <View style={styles.stepperRow}>
-            {[1, 2, 3, 4].map((n) => (
-              <TouchableOpacity
-                key={n}
-                onPress={() => setBatchSize(n)}
-                style={[
-                  styles.stepperButton,
-                  {
-                    backgroundColor: batchSize === n ? colors.primary : colors.surface,
-                    borderColor: batchSize === n ? colors.primary : colors.border,
-                  },
-                ]}
-              >
-                <Text
+            {[1, 2, 3, 4].map((n) => {
+              const maxBatch = selectedModel.extraParams?.maxBatch ?? 4;
+              const disabled = n > maxBatch;
+              return (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => !disabled && setBatchSize(Math.min(n, maxBatch))}
                   style={[
-                    styles.stepperText,
-                    { color: batchSize === n ? "#fff" : colors.foreground },
+                    styles.stepperButton,
+                    {
+                      backgroundColor: batchSize === n ? colors.primary : colors.surface,
+                      borderColor: batchSize === n ? colors.primary : colors.border,
+                      opacity: disabled ? 0.3 : 1,
+                    },
                   ]}
                 >
-                  {n}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.stepperText,
+                      { color: batchSize === n ? "#fff" : colors.foreground },
+                    ]}
+                  >
+                    {n}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 

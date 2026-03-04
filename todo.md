@@ -51,3 +51,4 @@
 - [x] Add "Reuse Settings" button on gallery images to pre-fill Generate tab with prompt, model, and all parameters
 - [x] Add negative prompt preset library with insertable templates (SDXL Quality, Anime Clean, Photorealistic, etc.)
 - [x] Add LoRA trigger word fetch and display from Civitai API when a LoRA is loaded
+- [x] Fix Google Imagen API — switched to generateImages endpoint for Imagen 4/Ultra/Fast, generateContent for Gemini 3.1 Flash Image / Gemini 3 Pro Image / Gemini 2.5 Flash Image; batch capped for Ultra/Pro models

@@ -32,3 +32,6 @@
 - [x] RunPod Dockerfile and deployment instructions
 - [x] App logo generation and branding
 - [x] Unit tests for types and Civitai module
+- [x] Fix Replicate model IDs (FLUX.2 Klein → flux-2-klein-4b, added FLUX.1 Schnell + FLUX 1.1 Pro)
+- [x] Fix Google Imagen API (use x-goog-api-key header, added Imagen 4 model, proper aspect ratio mapping)
+- [x] Improve error toast display (truncate long error messages, cleaner parsing)

@@ -209,7 +209,7 @@ export default function SettingsScreen() {
 
         {/* Google Section */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Google Vertex AI</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Google (Gemini API)</Text>
           <SecureInput
             label="API Key"
             value={keys.googleApiKey || ""}

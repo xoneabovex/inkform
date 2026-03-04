@@ -123,7 +123,8 @@ export default function GenerateScreen() {
 
       showToast(`Generated ${images.length} image${images.length > 1 ? "s" : ""}`, "success");
     } catch (error: any) {
-      showToast(error.message || "Generation failed", "error");
+      const errMsg = error.message || "Generation failed";
+      showToast(errMsg.length > 120 ? errMsg.slice(0, 120) + "..." : errMsg, "error");
     } finally {
       setGenerating(false);
       setProgressStatus("");

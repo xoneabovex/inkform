@@ -78,7 +78,15 @@ export async function createReplicatePrediction(
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Replicate API error: ${response.status} - ${err}`);
+    let message = `Replicate API error (${response.status})`;
+    try {
+      const errData = JSON.parse(err);
+      if (errData.detail) message = typeof errData.detail === "string" ? errData.detail : JSON.stringify(errData.detail);
+      else if (errData.title) message = errData.title;
+    } catch {
+      if (err.length < 200) message = err;
+    }
+    throw new Error(message);
   }
 
   const data: ReplicatePrediction = await response.json();

@@ -1,15 +1,49 @@
 import type { GenerationRequest } from "@/lib/types";
 
 /**
- * Generate images using Google's Imagen 3 API via the Generative Language API.
- * Uses the REST endpoint: https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict
+ * Map model IDs to their API model names.
+ */
+function getGoogleModelName(modelId: string): string {
+  switch (modelId) {
+    case "imagen-4":
+      return "imagen-4.0-generate-001";
+    case "imagen-3":
+    default:
+      return "imagen-3.0-generate-002";
+  }
+}
+
+/**
+ * Map aspect ratio values to Google-supported values.
+ * Google supports: "1:1", "3:4", "4:3", "9:16", "16:9"
+ */
+function mapAspectRatio(value: string): string {
+  const supported = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+  if (supported.includes(value)) return value;
+  // Map unsupported ratios to closest supported
+  switch (value) {
+    case "3:2":
+      return "4:3";
+    case "2:3":
+      return "3:4";
+    case "21:9":
+      return "16:9";
+    default:
+      return "1:1";
+  }
+}
+
+/**
+ * Generate images using Google's Imagen API via the Gemini API.
+ * Uses the REST endpoint with x-goog-api-key header for authentication.
  */
 export async function generateWithGoogleImagen(
   apiKey: string,
   req: GenerationRequest,
   onProgress?: (status: string) => void
 ): Promise<string[]> {
-  onProgress?.("Sending to Google Imagen 3...");
+  const modelName = getGoogleModelName(req.model.id);
+  onProgress?.(`Sending to Google ${modelName}...`);
 
   const requestBody: Record<string, any> = {
     instances: [
@@ -18,21 +52,18 @@ export async function generateWithGoogleImagen(
       },
     ],
     parameters: {
-      sampleCount: req.batchSize,
-      aspectRatio: req.aspectRatio.value,
+      sampleCount: Math.min(req.batchSize, 4),
+      aspectRatio: mapAspectRatio(req.aspectRatio.value),
     },
   };
 
-  if (req.negativePrompt) {
-    requestBody.parameters.negativePrompt = req.negativePrompt;
-  }
-
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:predict`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
       body: JSON.stringify(requestBody),
     }
@@ -40,7 +71,18 @@ export async function generateWithGoogleImagen(
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Google Imagen API error: ${response.status} - ${err}`);
+    // Provide a user-friendly error message
+    let message = `Google Imagen API error (${response.status})`;
+    try {
+      const errData = JSON.parse(err);
+      if (errData.error?.message) {
+        message = errData.error.message;
+      }
+    } catch {
+      // Use raw text if not JSON
+      if (err.length < 200) message = err;
+    }
+    throw new Error(message);
   }
 
   onProgress?.("Processing response...");
@@ -61,5 +103,5 @@ export async function generateWithGoogleImagen(
       .filter(Boolean);
   }
 
-  throw new Error("No images in Google Imagen response");
+  throw new Error("No images returned from Google Imagen. The prompt may have been blocked by safety filters.");
 }

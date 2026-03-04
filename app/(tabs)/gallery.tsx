@@ -19,6 +19,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -35,6 +36,7 @@ import {
   createCollection,
   addImageToCollection,
   removeImageFromCollection,
+  saveReuseSettings,
 } from "@/lib/storage/app-storage";
 import type { GalleryImage, Collection } from "@/lib/types";
 
@@ -205,6 +207,7 @@ const viewerStyles = StyleSheet.create({
 export default function GalleryScreen() {
   const colors = useColors();
   const { showToast } = useToast();
+  const router = useRouter();
 
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -322,6 +325,23 @@ export default function GalleryScreen() {
   const openFullscreen = (uri: string) => {
     setFullscreenUri(uri);
     setShowFullscreen(true);
+  };
+
+  const handleReuseSettings = async (image: GalleryImage) => {
+    try {
+      await saveReuseSettings({
+        prompt: image.prompt,
+        negativePrompt: image.negativePrompt,
+        provider: image.provider,
+        modelId: image.model.toLowerCase().replace(/\s+/g, "-"),
+        aspectRatioValue: image.aspectRatio,
+      });
+      setShowDetail(false);
+      router.push("/(tabs)" as any);
+      showToast("Settings loaded — ready to regenerate", "success");
+    } catch {
+      showToast("Failed to load settings", "error");
+    }
   };
 
   const renderImageItem = ({ item }: { item: GalleryImage }) => (
@@ -530,13 +550,21 @@ export default function GalleryScreen() {
                   </View>
                 </View>
 
-                {/* Share button */}
-                <TouchableOpacity
-                  onPress={() => handleShare(selectedImage.uri)}
-                  style={[styles.shareBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                >
-                  <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>⬆ Share Image</Text>
-                </TouchableOpacity>
+                {/* Action buttons */}
+                <View style={styles.actionBtnRow}>
+                  <TouchableOpacity
+                    onPress={() => handleShare(selectedImage.uri)}
+                    style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  >
+                    <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>⬆ Share</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleReuseSettings(selectedImage)}
+                    style={[styles.actionBtn, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>↺ Reuse Settings</Text>
+                  </TouchableOpacity>
+                </View>
 
                 {/* Add to Collection */}
                 {collections.length > 0 && (
@@ -750,6 +778,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
     marginBottom: 12,
+  },
+  actionBtnRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  actionBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 12,
+    alignItems: "center",
   },
   collectionChips: {
     flexDirection: "row",

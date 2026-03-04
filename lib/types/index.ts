@@ -136,6 +136,7 @@ export interface LoraEntry {
   id: string; // Civitai version ID
   weight: number; // 0.0 to 2.0
   preview: CivitaiModelPreview | null;
+  triggerWords?: string[];
 }
 
 // ===== Aspect Ratio =====

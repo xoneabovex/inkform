@@ -48,3 +48,6 @@
 - [x] Remove SDXL from Replicate model list
 - [x] Update RunPod worker handler: sampling_method, seed, clip_skip, lora weights, SD1.5/Pony/Illustrious support
 - [x] Clean up Settings screen (removed Civitai config, added helpful hints for each key)
+- [x] Add "Reuse Settings" button on gallery images to pre-fill Generate tab with prompt, model, and all parameters
+- [x] Add negative prompt preset library with insertable templates (SDXL Quality, Anime Clean, Photorealistic, etc.)
+- [x] Add LoRA trigger word fetch and display from Civitai API when a LoRA is loaded

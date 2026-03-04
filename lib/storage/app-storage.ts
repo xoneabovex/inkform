@@ -14,6 +14,7 @@ const KEYS = {
   SETTINGS: "inkform_settings",
   CIVITAI_BASE_MODEL: "inkform_civitai_base_model",
   CIVITAI_LORAS: "inkform_civitai_loras",
+  REUSE_SETTINGS: "inkform_reuse_settings",
 };
 
 // ===== Gallery =====
@@ -180,6 +181,36 @@ const DEFAULT_SETTINGS: AppSettings = {
 export async function getSettings(): Promise<AppSettings> {
   const data = await AsyncStorage.getItem(KEYS.SETTINGS);
   return data ? { ...DEFAULT_SETTINGS, ...JSON.parse(data) } : DEFAULT_SETTINGS;
+}
+
+// ===== Reuse Settings (pre-fill Generate tab from gallery) =====
+
+export interface ReuseSettings {
+  prompt: string;
+  negativePrompt?: string;
+  provider: ProviderType;
+  modelId: string;
+  aspectRatioValue: string;
+  cfg?: number;
+  steps?: number;
+  seed?: number;
+  samplingMethod?: string;
+  clipSkip?: number;
+  qualityBoost?: boolean;
+  civitaiModelInput?: string;
+}
+
+export async function saveReuseSettings(settings: ReuseSettings): Promise<void> {
+  await AsyncStorage.setItem(KEYS.REUSE_SETTINGS, JSON.stringify(settings));
+}
+
+export async function getReuseSettings(): Promise<ReuseSettings | null> {
+  const data = await AsyncStorage.getItem(KEYS.REUSE_SETTINGS);
+  return data ? JSON.parse(data) : null;
+}
+
+export async function clearReuseSettings(): Promise<void> {
+  await AsyncStorage.removeItem(KEYS.REUSE_SETTINGS);
 }
 
 export async function saveSettings(

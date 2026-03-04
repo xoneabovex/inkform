@@ -1,5 +1,9 @@
 import type { CivitaiModelPreview } from "@/lib/types";
 
+export interface CivitaiModelDetails extends CivitaiModelPreview {
+  triggerWords: string[];
+}
+
 /**
  * Extract Civitai model version ID from a URL or raw ID string.
  * Supports formats:
@@ -58,7 +62,8 @@ export async function fetchCivitaiModelVersion(
         : data.name || `Model ${versionId}`,
       thumbnailUrl,
       baseModel: data.baseModel,
-    };
+      triggerWords: Array.isArray(data.trainedWords) ? data.trainedWords : [],
+    } as CivitaiModelDetails;
   } catch (error) {
     console.error("Failed to fetch Civitai model:", error);
     return null;

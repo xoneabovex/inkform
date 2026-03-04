@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import {
   Text,
   View,
@@ -19,9 +21,9 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
 import { generateImages } from "@/lib/api/generate";
-import { saveGalleryImage } from "@/lib/storage/app-storage";
-import { addPromptToHistory } from "@/lib/storage/app-storage";
+import { saveGalleryImage, addPromptToHistory, getReuseSettings, clearReuseSettings } from "@/lib/storage/app-storage";
 import { fetchCivitaiModelVersion, parseCivitaiId } from "@/lib/api/civitai";
+import type { CivitaiModelDetails } from "@/lib/api/civitai";
 import { getApiKey } from "@/lib/storage/secure-store";
 import {
   REPLICATE_MODELS,
@@ -114,13 +116,16 @@ function LoraRow({
   entry,
   onRemove,
   onWeightChange,
+  onInsertTrigger,
   colors,
 }: {
   entry: LoraEntry;
   onRemove: () => void;
   onWeightChange: (w: number) => void;
+  onInsertTrigger?: (words: string) => void;
   colors: any;
 }) {
+  const hasTriggers = entry.triggerWords && entry.triggerWords.length > 0;
   return (
     <View style={[styles.loraRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       {entry.preview?.thumbnailUrl ? (
@@ -141,6 +146,16 @@ function LoraRow({
         <Text style={[styles.loraBase, { color: colors.muted }]}>
           {entry.preview?.baseModel || "Unknown base"}
         </Text>
+        {hasTriggers && (
+          <TouchableOpacity
+            onPress={() => onInsertTrigger?.(entry.triggerWords!.join(", "))}
+            style={[styles.loraTriggerBtn, { backgroundColor: colors.primary + "22", borderColor: colors.primary + "44" }]}
+          >
+            <Text style={[styles.loraTriggerText, { color: colors.primary }]} numberOfLines={1}>
+              + triggers: {entry.triggerWords!.slice(0, 2).join(", ")}{entry.triggerWords!.length > 2 ? "..." : ""}
+            </Text>
+          </TouchableOpacity>
+        )}
         <View style={styles.loraWeightRow}>
           <TouchableOpacity
             onPress={() => onWeightChange(Math.max(0, Math.round((entry.weight - 0.1) * 10) / 10))}
@@ -212,6 +227,36 @@ export default function GenerateScreen() {
   // Fullscreen viewer
   const [viewerUri, setViewerUri] = useState<string | null>(null);
 
+  // Negative prompt presets
+  const [showNegPresets, setShowNegPresets] = useState(false);
+
+  const NEGATIVE_PRESETS = [
+    {
+      label: "SDXL Quality",
+      value: "worst quality, low quality, normal quality, lowres, blurry, jpeg artifacts, watermark, signature, text, logo, bad anatomy, bad hands, extra fingers, missing fingers, deformed, ugly",
+    },
+    {
+      label: "Anime Clean",
+      value: "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name",
+    },
+    {
+      label: "Photorealistic",
+      value: "cartoon, anime, illustration, painting, drawing, art, sketch, 3d render, cgi, unrealistic, deformed, disfigured, bad anatomy, extra limbs, watermark, text, blurry, low quality, grainy",
+    },
+    {
+      label: "Pony/Illustrious",
+      value: "score_4, score_3, score_2, score_1, bad quality, worst quality, low quality, normal quality, lowres, bad anatomy, bad hands, extra fingers, missing fingers, deformed, ugly, watermark, text",
+    },
+    {
+      label: "No Watermarks",
+      value: "watermark, signature, text, logo, username, artist name, copyright, url",
+    },
+    {
+      label: "Face Fix",
+      value: "bad face, deformed face, ugly face, asymmetrical eyes, cross-eyed, extra eyes, missing eyes, bad teeth, deformed teeth, bad nose, deformed nose",
+    },
+  ];
+
   useEffect(() => {
     const models = getModelsForProvider(provider);
     if (models.length > 0) {
@@ -220,6 +265,50 @@ export default function GenerateScreen() {
       setSteps(models[0].defaultSteps ?? 30);
     }
   }, [provider]);
+
+  // Load reuse settings when tab comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        const reuse = await getReuseSettings();
+        if (!reuse) return;
+        await clearReuseSettings();
+
+        // Apply provider
+        setProvider(reuse.provider);
+        const models = getModelsForProvider(reuse.provider);
+        const matchedModel = models.find((m) => m.id === reuse.modelId) || models[0];
+        if (matchedModel) {
+          setSelectedModel(matchedModel);
+          setCfg(reuse.cfg ?? matchedModel.defaultCfg ?? 7);
+          setSteps(reuse.steps ?? matchedModel.defaultSteps ?? 30);
+        }
+
+        // Apply prompts
+        setPrompt(reuse.prompt);
+        if (reuse.negativePrompt) {
+          setNegativePrompt(reuse.negativePrompt);
+          setShowNegative(true);
+        }
+
+        // Apply aspect ratio
+        const ar = ASPECT_RATIOS.find((a) => a.value === reuse.aspectRatioValue);
+        if (ar) setAspectRatio(ar);
+
+        // Apply advanced params
+        if (reuse.seed !== undefined) {
+          setSeed(String(reuse.seed));
+          setUseRandomSeed(false);
+        }
+        if (reuse.samplingMethod) setSamplingMethod(reuse.samplingMethod as SamplingMethodId);
+        if (reuse.clipSkip !== undefined) setClipSkip(reuse.clipSkip);
+        if (reuse.qualityBoost !== undefined) setQualityBoost(reuse.qualityBoost);
+        if (reuse.civitaiModelInput) setCivitaiModelInput(reuse.civitaiModelInput);
+
+        showToast("Settings loaded from gallery image", "success");
+      })();
+    }, [])
+  );
 
   // ===== Civitai Fetch =====
   const fetchCivitaiModel = useCallback(async () => {
@@ -258,11 +347,16 @@ export default function GenerateScreen() {
     setFetchingLora(true);
     try {
       const civitaiToken = await getApiKey("civitaiApiToken");
-      const preview = await fetchCivitaiModelVersion(id, civitaiToken || undefined);
-      const entry: LoraEntry = { id, weight: 0.8, preview };
+      const details = await fetchCivitaiModelVersion(id, civitaiToken || undefined) as CivitaiModelDetails | null;
+      const triggerWords = details?.triggerWords ?? [];
+      const entry: LoraEntry = { id, weight: 0.8, preview: details, triggerWords };
       setLoraEntries((prev) => [...prev, entry]);
       setLoraInput("");
-      showToast(preview ? "LoRA added: " + preview.name.slice(0, 30) : "LoRA added", "success");
+      if (triggerWords.length > 0) {
+        showToast(`LoRA added — triggers: ${triggerWords.slice(0, 3).join(", ")}`, "success");
+      } else {
+        showToast(details ? "LoRA added: " + details.name.slice(0, 30) : "LoRA added", "success");
+      }
     } catch {
       showToast("Failed to fetch LoRA info", "error");
     } finally {
@@ -528,6 +622,10 @@ export default function GenerateScreen() {
                 entry={entry}
                 onRemove={() => removeLoraEntry(entry.id)}
                 onWeightChange={(w) => updateLoraWeight(entry.id, w)}
+                onInsertTrigger={(words) => {
+                  setPrompt((prev) => prev ? prev + ", " + words : words);
+                  showToast("Trigger words added to prompt", "success");
+                }}
                 colors={colors}
               />
             ))}
@@ -555,14 +653,40 @@ export default function GenerateScreen() {
         {/* Negative Prompt */}
         {selectedModel.supportsNegativePrompt && (
           <View style={styles.promptSection}>
-            <TouchableOpacity
-              onPress={() => setShowNegative(!showNegative)}
-              style={styles.negativeToggle}
-            >
-              <Text style={[styles.fieldLabel, { color: colors.muted }]}>
-                NEGATIVE PROMPT {showNegative ? "▲" : "▼"}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.negativeHeader}>
+              <TouchableOpacity
+                onPress={() => setShowNegative(!showNegative)}
+                style={styles.negativeToggle}
+              >
+                <Text style={[styles.fieldLabel, { color: colors.muted }]}>
+                  NEGATIVE PROMPT {showNegative ? "▲" : "▼"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowNegPresets(!showNegPresets)}
+                style={[styles.presetToggleBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <Text style={[styles.presetToggleBtnText, { color: colors.primary }]}>Presets</Text>
+              </TouchableOpacity>
+            </View>
+            {showNegPresets && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                {NEGATIVE_PRESETS.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.label}
+                    onPress={() => {
+                      setNegativePrompt(preset.value);
+                      setShowNegative(true);
+                      setShowNegPresets(false);
+                      showToast(`Applied: ${preset.label}`, "success");
+                    }}
+                    style={[styles.negPresetChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  >
+                    <Text style={[styles.negPresetText, { color: colors.foreground }]}>{preset.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
             {showNegative && (
               <TextInput
                 style={[
@@ -1016,6 +1140,19 @@ const styles = StyleSheet.create({
   loraRemove: {
     padding: 8,
   },
+  loraTriggerBtn: {
+    borderRadius: 6,
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    marginTop: 3,
+    marginBottom: 2,
+    alignSelf: "flex-start",
+  },
+  loraTriggerText: {
+    fontSize: 10,
+    fontWeight: "600",
+  },
   // Prompts
   promptSection: {
     marginTop: 14,
@@ -1035,8 +1172,36 @@ const styles = StyleSheet.create({
     minHeight: 100,
     lineHeight: 22,
   },
+  negativeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
   negativeToggle: {
     paddingVertical: 4,
+    flex: 1,
+  },
+  presetToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  presetToggleBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  negPresetChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginRight: 8,
+  },
+  negPresetText: {
+    fontSize: 13,
+    fontWeight: "500",
   },
   // Params
   paramSection: {

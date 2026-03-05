@@ -64,3 +64,5 @@
 - [x] Add exit confirmation dialog when pressing back to close app (Android BackHandler)
 - [x] Update API modules for new model catalog (full ecosystem with architecture flags)
 - [x] Update RunPod worker for img2img, hi-res fix, VAE selection, mature content
+- [x] Fix accordion dropdown not scrollable independently — wrapped content in ScrollView with nestedScrollEnabled
+- [x] Fix gallery fullscreen pinch-to-zoom and double-tap — added GestureHandlerRootView inside Modal, fixed gesture composition to Exclusive(Simultaneous(pinch,pan), doubleTap)

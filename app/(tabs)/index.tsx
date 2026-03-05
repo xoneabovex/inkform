@@ -370,45 +370,52 @@ export default function StudioScreen() {
 
         {showModelPicker && (
           <View style={[styles.accordionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {MODEL_CATALOG.map((group) => (
-              <View key={group.name}>
-                <TouchableOpacity
-                  onPress={() => setExpandedEcosystem(expandedEcosystem === group.name ? null : group.name)}
-                  style={[styles.accordionHeader, { borderBottomColor: colors.border }]}
-                >
-                  <Text style={[styles.accordionTitle, { color: colors.foreground }]}>{group.name}</Text>
-                  <Text style={{ color: colors.muted }}>{expandedEcosystem === group.name ? "−" : "+"}</Text>
-                </TouchableOpacity>
-                {expandedEcosystem === group.name &&
-                  group.models.map((model) => (
-                    <TouchableOpacity
-                      key={model.id}
-                      onPress={() => {
-                        setSelectedModel(model);
-                        setShowModelPicker(false);
-                        setExpandedEcosystem(null);
-                      }}
-                      style={[
-                        styles.accordionItem,
-                        { borderBottomColor: colors.border },
-                        model.id === selectedModel.id && { backgroundColor: colors.primary + "20" },
-                      ]}
-                    >
-                      <Text
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: 380 }}
+            >
+              {MODEL_CATALOG.map((group) => (
+                <View key={group.name}>
+                  <TouchableOpacity
+                    onPress={() => setExpandedEcosystem(expandedEcosystem === group.name ? null : group.name)}
+                    style={[styles.accordionHeader, { borderBottomColor: colors.border }]}
+                  >
+                    <Text style={[styles.accordionTitle, { color: colors.foreground }]}>{group.name}</Text>
+                    <Text style={{ color: colors.muted }}>{expandedEcosystem === group.name ? "−" : "+"}</Text>
+                  </TouchableOpacity>
+                  {expandedEcosystem === group.name &&
+                    group.models.map((model) => (
+                      <TouchableOpacity
+                        key={model.id}
+                        onPress={() => {
+                          setSelectedModel(model);
+                          setShowModelPicker(false);
+                          setExpandedEcosystem(null);
+                        }}
                         style={[
-                          styles.accordionItemText,
-                          { color: model.id === selectedModel.id ? colors.primary : colors.foreground },
+                          styles.accordionItem,
+                          { borderBottomColor: colors.border },
+                          model.id === selectedModel.id && { backgroundColor: colors.primary + "20" },
                         ]}
                       >
-                        {model.name}
-                      </Text>
-                      <Text style={[styles.accordionItemBadge, { color: colors.muted }]}>
-                        {model.provider === "replicate" ? "API" : model.provider === "google" ? "API" : "RunPod"}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-              </View>
-            ))}
+                        <Text
+                          style={[
+                            styles.accordionItemText,
+                            { color: model.id === selectedModel.id ? colors.primary : colors.foreground },
+                          ]}
+                        >
+                          {model.name}
+                        </Text>
+                        <Text style={[styles.accordionItemBadge, { color: colors.muted }]}>
+                          {model.provider === "replicate" ? "API" : model.provider === "google" ? "API" : "RunPod"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                </View>
+              ))}
+            </ScrollView>
           </View>
         )}
 
@@ -1069,7 +1076,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 6,
     overflow: "hidden",
-    maxHeight: 400,
   },
   accordionHeader: {
     flexDirection: "row",

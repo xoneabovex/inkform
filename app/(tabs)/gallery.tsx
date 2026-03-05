@@ -20,7 +20,7 @@ import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -73,6 +73,7 @@ function FullscreenViewer({
     .onStart((e) => {
       focalX.value = e.focalX;
       focalY.value = e.focalY;
+      savedScale.value = scale.value;
     })
     .onUpdate((e) => {
       const newScale = Math.max(1, Math.min(6, savedScale.value * e.scale));
@@ -80,7 +81,7 @@ function FullscreenViewer({
     })
     .onEnd(() => {
       savedScale.value = scale.value;
-      if (scale.value < 1.1) {
+      if (scale.value < 1.05) {
         scale.value = withTiming(1, { duration: 200 });
         savedScale.value = 1;
         translateX.value = withTiming(0, { duration: 200 });
@@ -93,6 +94,10 @@ function FullscreenViewer({
   const panGesture = Gesture.Pan()
     .minPointers(1)
     .maxPointers(2)
+    .onStart(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    })
     .onUpdate((e) => {
       if (scale.value > 1.05) {
         const maxX = (SCREEN_WIDTH * (scale.value - 1)) / 2;
@@ -110,8 +115,11 @@ function FullscreenViewer({
 
   const doubleTapGesture = Gesture.Tap()
     .numberOfTaps(2)
-    .onEnd(() => {
+    .maxDuration(300)
+    .onEnd((_e, success) => {
+      if (!success) return;
       if (savedScale.value > 1.05) {
+        // Zoom out
         scale.value = withTiming(1, { duration: 250 });
         savedScale.value = 1;
         translateX.value = withTiming(0, { duration: 250 });
@@ -119,15 +127,16 @@ function FullscreenViewer({
         savedTranslateX.value = 0;
         savedTranslateY.value = 0;
       } else {
-        scale.value = withTiming(3, { duration: 250 });
-        savedScale.value = 3;
+        // Zoom in to 2.5x
+        scale.value = withTiming(2.5, { duration: 250 });
+        savedScale.value = 2.5;
       }
     });
 
-  // Compose: pinch + pan simultaneous, double-tap exclusive
-  const composed = Gesture.Race(
+  // Exclusive: pinch+pan win immediately on 2 fingers; double-tap fires on confirmed 2-tap
+  const composed = Gesture.Exclusive(
+    Gesture.Simultaneous(pinchGesture, panGesture),
     doubleTapGesture,
-    Gesture.Simultaneous(pinchGesture, panGesture)
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -140,47 +149,50 @@ function FullscreenViewer({
 
   return (
     <Modal visible animationType="fade" transparent statusBarTranslucent>
-      <View style={viewerStyles.overlay}>
-        {/* Top bar */}
-        <View style={viewerStyles.topBar}>
-          <TouchableOpacity onPress={onClose} style={viewerStyles.closeBtn}>
-            <Text style={viewerStyles.closeBtnText}>✕</Text>
-          </TouchableOpacity>
-          <View style={viewerStyles.topActions}>
-            <TouchableOpacity onPress={onCopyPrompt} style={viewerStyles.topBtn}>
-              <Text style={viewerStyles.topBtnText}>📋</Text>
+      {/* GestureHandlerRootView is required inside Modal on Android */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={viewerStyles.overlay}>
+          {/* Top bar */}
+          <View style={viewerStyles.topBar}>
+            <TouchableOpacity onPress={onClose} style={viewerStyles.closeBtn}>
+              <Text style={viewerStyles.closeBtnText}>✕</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onShare} style={viewerStyles.topBtn}>
-              <Text style={viewerStyles.topBtnText}>↗</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={onSave}
-              style={[viewerStyles.topBtn, { backgroundColor: colors.primary }]}
-            >
-              <Text style={viewerStyles.topBtnText}>💾 Save</Text>
-            </TouchableOpacity>
+            <View style={viewerStyles.topActions}>
+              <TouchableOpacity onPress={onCopyPrompt} style={viewerStyles.topBtn}>
+                <Text style={viewerStyles.topBtnText}>📋</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onShare} style={viewerStyles.topBtn}>
+                <Text style={viewerStyles.topBtnText}>↗</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onSave}
+                style={[viewerStyles.topBtn, { backgroundColor: colors.primary }]}
+              >
+                <Text style={viewerStyles.topBtnText}>💾 Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Zoomable image area — fills the space between top bar and bottom bar */}
+          <GestureDetector gesture={composed}>
+            <Animated.View style={[viewerStyles.imageContainer, animatedStyle]}>
+              <Image
+                source={{ uri: image.uri }}
+                style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.8 }}
+                contentFit="contain"
+              />
+            </Animated.View>
+          </GestureDetector>
+
+          {/* Bottom info */}
+          <View style={viewerStyles.bottomBar}>
+            <Text style={viewerStyles.bottomModel} numberOfLines={1}>
+              {image.model} · {image.provider}
+            </Text>
+            <Text style={viewerStyles.hint}>Pinch to zoom · Double-tap to zoom in/out</Text>
           </View>
         </View>
-
-        {/* Zoomable image — Animated.View wraps the Image */}
-        <GestureDetector gesture={composed}>
-          <Animated.View style={[viewerStyles.imageContainer, animatedStyle]}>
-            <Image
-              source={{ uri: image.uri }}
-              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.8 }}
-              contentFit="contain"
-            />
-          </Animated.View>
-        </GestureDetector>
-
-        {/* Bottom info */}
-        <View style={viewerStyles.bottomBar}>
-          <Text style={viewerStyles.bottomModel} numberOfLines={1}>
-            {image.model} · {image.provider}
-          </Text>
-          <Text style={viewerStyles.hint}>Pinch to zoom · Double-tap to zoom in/out</Text>
-        </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

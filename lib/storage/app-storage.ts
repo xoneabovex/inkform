@@ -1,4 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
+import { Platform } from "react-native";
 import type {
   GalleryImage,
   Collection,
@@ -15,6 +17,70 @@ const KEYS = {
   REUSE_SETTINGS: "inkform_reuse_settings",
 };
 
+const MAX_GALLERY_IMAGES = 500;
+
+// ===== Image Filesystem Helpers =====
+
+/**
+ * Returns the permanent directory for storing Inkform images.
+ * Uses documentDirectory which persists across app restarts.
+ */
+function getImagesDir(): string {
+  return (FileSystem.documentDirectory || "") + "inkform_images/";
+}
+
+/**
+ * Ensures the images directory exists.
+ */
+async function ensureImagesDirExists(): Promise<void> {
+  if (Platform.OS === "web") return;
+  const dir = getImagesDir();
+  const info = await FileSystem.getInfoAsync(dir);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+  }
+}
+
+/**
+ * Downloads a remote image URL to permanent local storage.
+ * If the URI is already a local file:// path, returns it as-is.
+ * Returns the local file:// URI.
+ */
+export async function downloadImageToLocal(remoteUri: string): Promise<string> {
+  if (Platform.OS === "web") return remoteUri;
+
+  // Already a local file — nothing to do
+  if (remoteUri.startsWith("file://") || remoteUri.startsWith("/")) {
+    return remoteUri;
+  }
+
+  await ensureImagesDirExists();
+
+  const ext = remoteUri.includes(".png") ? "png" : "jpg";
+  const filename = `inkform_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const destUri = getImagesDir() + filename;
+
+  const result = await FileSystem.downloadAsync(remoteUri, destUri);
+  return result.uri;
+}
+
+/**
+ * Deletes a local image file from the filesystem.
+ * Silently ignores errors (file may already be deleted).
+ */
+async function deleteLocalImageFile(uri: string): Promise<void> {
+  if (Platform.OS === "web") return;
+  if (!uri.startsWith("file://")) return;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    }
+  } catch {
+    // Ignore — file may already be gone
+  }
+}
+
 // ===== Gallery =====
 
 export async function getGalleryImages(): Promise<GalleryImage[]> {
@@ -25,10 +91,22 @@ export async function getGalleryImages(): Promise<GalleryImage[]> {
 export async function saveGalleryImage(image: GalleryImage): Promise<void> {
   const images = await getGalleryImages();
   images.unshift(image);
+
+  // Enforce 500-image cap — delete oldest images and their files
+  if (images.length > MAX_GALLERY_IMAGES) {
+    const removed = images.splice(MAX_GALLERY_IMAGES);
+    for (const old of removed) {
+      await deleteLocalImageFile(old.uri);
+    }
+  }
+
   await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(images));
 }
 
-/** Convenience: create a GalleryImage from generation params and save it */
+/**
+ * Convenience: download image to local storage, create a GalleryImage, and persist it.
+ * This is the primary entry point called after generation.
+ */
 export async function saveImageToGallery(params: {
   uri: string;
   prompt: string;
@@ -40,10 +118,19 @@ export async function saveImageToGallery(params: {
   samplingMethod?: string;
   cfg?: number;
   steps?: number;
-}): Promise<void> {
+}): Promise<GalleryImage> {
+  // Download to permanent local storage so the image never expires
+  let localUri = params.uri;
+  try {
+    localUri = await downloadImageToLocal(params.uri);
+  } catch {
+    // If download fails, fall back to remote URI (better than nothing)
+    localUri = params.uri;
+  }
+
   const image: GalleryImage = {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
-    uri: params.uri,
+    uri: localUri,
     prompt: params.prompt,
     negativePrompt: params.negativePrompt,
     provider: params.provider,
@@ -57,10 +144,15 @@ export async function saveImageToGallery(params: {
     steps: params.steps,
   };
   await saveGalleryImage(image);
+  return image;
 }
 
 export async function deleteGalleryImage(id: string): Promise<void> {
   const images = await getGalleryImages();
+  const target = images.find((img) => img.id === id);
+  if (target) {
+    await deleteLocalImageFile(target.uri);
+  }
   const filtered = images.filter((img) => img.id !== id);
   await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(filtered));
 }
@@ -105,7 +197,7 @@ export async function deleteCollection(id: string): Promise<void> {
     ...img,
     collections: img.collections.filter((cid) => cid !== id),
   }));
-  await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(updated));
+  await AsyncStorage.setItem(KEYS.COLLECTIONS, JSON.stringify(updated));
 }
 
 export async function addImageToCollection(
@@ -166,7 +258,6 @@ export async function addPromptToHistory(
   await AsyncStorage.setItem(KEYS.PROMPT_HISTORY, JSON.stringify(history));
 }
 
-/** Convenience: save prompt from generation params */
 export async function savePromptToHistory(params: {
   prompt: string;
   negativePrompt?: string;

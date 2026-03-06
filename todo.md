@@ -66,3 +66,5 @@
 - [x] Update RunPod worker for img2img, hi-res fix, VAE selection, mature content
 - [x] Fix accordion dropdown not scrollable independently — wrapped content in ScrollView with nestedScrollEnabled
 - [x] Fix gallery fullscreen pinch-to-zoom and double-tap — added GestureHandlerRootView inside Modal, fixed gesture composition to Exclusive(Simultaneous(pinch,pan), doubleTap)
+- [x] Fix gallery image persistence — images now downloaded to permanent local filesystem (documentDirectory) at save time; 500-image cap with oldest auto-deleted
+- [x] Fix save-to-device — switched to createAssetAsync (reliable on Android); added Save All + per-image save buttons in generate results; gallery viewer and detail modal now use local URIs

@@ -17,6 +17,8 @@ import {
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
+import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system/legacy";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
@@ -302,9 +304,8 @@ export default function StudioScreen() {
       };
 
       const images = await generateImages(req, setGenStatus);
-      setGeneratedImages(images);
 
-      // Save to history and gallery
+      // Save to history and gallery (downloads to local storage)
       await savePromptToHistory({
         prompt: prompt.trim(),
         negativePrompt: negativePrompt.trim() || undefined,
@@ -312,8 +313,9 @@ export default function StudioScreen() {
         model: selectedModel.name,
       });
 
+      const localUris: string[] = [];
       for (const uri of images) {
-        await saveImageToGallery({
+        const saved = await saveImageToGallery({
           uri,
           prompt: prompt.trim(),
           negativePrompt: negativePrompt.trim() || undefined,
@@ -325,7 +327,12 @@ export default function StudioScreen() {
           cfg: selectedModel.supportsCfg ? cfg : undefined,
           steps: selectedModel.supportsSteps ? steps : undefined,
         });
+        // Use the local URI so the result card shows the cached image
+        localUris.push(saved.uri);
       }
+
+      // Show local URIs in results (they persist even if remote URL expires)
+      setGeneratedImages(localUris);
 
       showToast(`Generated ${images.length} image${images.length > 1 ? "s" : ""}`, "success");
     } catch (err: any) {
@@ -959,7 +966,36 @@ export default function StudioScreen() {
         {/* ===== Generated Images ===== */}
         {generatedImages.length > 0 && (
           <View style={styles.resultsSection}>
-            <Text style={[styles.label, { color: colors.muted }]}>RESULTS</Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <Text style={[styles.label, { color: colors.muted }]}>RESULTS</Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  if (Platform.OS === "web") { showToast("Save not supported on web", "warning"); return; }
+                  try {
+                    const { status } = await MediaLibrary.requestPermissionsAsync();
+                    if (status !== "granted") { showToast("Camera roll permission denied", "error"); return; }
+                    let saved = 0;
+                    for (const uri of generatedImages) {
+                      let localUri = uri;
+                      if (uri.startsWith("http")) {
+                        const ext = uri.includes(".png") ? "png" : "jpg";
+                        const dest = (FileSystem.cacheDirectory || "") + `inkform_save_${Date.now()}_${saved}.${ext}`;
+                        const { uri: dl } = await FileSystem.downloadAsync(uri, dest);
+                        localUri = dl;
+                      }
+                      await MediaLibrary.createAssetAsync(localUri);
+                      saved++;
+                    }
+                    showToast(`Saved ${saved} image${saved > 1 ? "s" : ""} to camera roll ✓`, "success");
+                  } catch (e: any) {
+                    showToast("Failed to save: " + (e.message || "unknown"), "error");
+                  }
+                }}
+                style={[styles.saveAllBtn, { backgroundColor: colors.primary }]}
+              >
+                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>💾 Save All</Text>
+              </TouchableOpacity>
+            </View>
             <FlatList
               data={generatedImages}
               horizontal
@@ -968,6 +1004,29 @@ export default function StudioScreen() {
               renderItem={({ item }) => (
                 <View style={[styles.resultCard, { borderColor: colors.border }]}>
                   <Image source={{ uri: item }} style={styles.resultImage} contentFit="cover" />
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (Platform.OS === "web") { showToast("Save not supported on web", "warning"); return; }
+                      try {
+                        const { status } = await MediaLibrary.requestPermissionsAsync();
+                        if (status !== "granted") { showToast("Camera roll permission denied", "error"); return; }
+                        let localUri = item;
+                        if (item.startsWith("http")) {
+                          const ext = item.includes(".png") ? "png" : "jpg";
+                          const dest = (FileSystem.cacheDirectory || "") + `inkform_save_${Date.now()}.${ext}`;
+                          const { uri: dl } = await FileSystem.downloadAsync(item, dest);
+                          localUri = dl;
+                        }
+                        await MediaLibrary.createAssetAsync(localUri);
+                        showToast("Saved to camera roll ✓", "success");
+                      } catch (e: any) {
+                        showToast("Failed to save: " + (e.message || "unknown"), "error");
+                      }
+                    }}
+                    style={[styles.resultSaveBtn, { backgroundColor: "rgba(0,0,0,0.55)" }]}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>💾</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             />
@@ -1344,5 +1403,18 @@ const styles = StyleSheet.create({
   resultImage: {
     width: SCREEN_W * 0.7,
     height: SCREEN_W * 0.9,
+  },
+  saveAllBtn: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  resultSaveBtn: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
 });

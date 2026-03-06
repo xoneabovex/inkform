@@ -357,15 +357,22 @@ export default function GalleryScreen() {
         showToast("Camera roll permission denied", "error");
         return;
       }
+
       let localUri = uri;
+
+      // If it's a remote URL, download to cache first
       if (uri.startsWith("http")) {
-        const filename = `inkform_${Date.now()}.jpg`;
-        const dest = FileSystem.cacheDirectory + filename;
+        const ext = uri.includes(".png") ? "png" : "jpg";
+        const filename = `inkform_save_${Date.now()}.${ext}`;
+        const dest = (FileSystem.cacheDirectory || "") + filename;
         const { uri: downloaded } = await FileSystem.downloadAsync(uri, dest);
         localUri = downloaded;
       }
-      await MediaLibrary.saveToLibraryAsync(localUri);
-      showToast("Saved to camera roll", "success");
+
+      // createAssetAsync is more reliable than saveToLibraryAsync on Android
+      // and works with both file:// and content:// URIs
+      await MediaLibrary.createAssetAsync(localUri);
+      showToast("Saved to camera roll ✓", "success");
     } catch (e: any) {
       showToast("Failed to save: " + (e.message || "unknown error"), "error");
     }

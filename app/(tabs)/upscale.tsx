@@ -73,12 +73,21 @@ export default function UpscaleScreen() {
         setProgressStatus
       );
 
-      setResultImage(result);
+      // Download upscaled image to permanent local storage
+      let localUri = result;
+      try {
+        const { downloadImageToLocal } = await import("@/lib/storage/app-storage");
+        localUri = await downloadImageToLocal(result);
+      } catch {
+        localUri = result; // fallback to remote URI
+      }
 
-      // Save to gallery
+      setResultImage(localUri);
+
+      // Save to gallery with local URI
       const galleryImage: GalleryImage = {
         id: Date.now().toString() + Math.random().toString(36).slice(2),
-        uri: result,
+        uri: localUri,
         prompt: selectedImage.prompt + " (upscaled)",
         negativePrompt: selectedImage.negativePrompt,
         provider: selectedImage.provider,
@@ -127,10 +136,16 @@ export default function UpscaleScreen() {
         return;
       }
 
-      const fileUri = FileSystem.documentDirectory + `inkform-upscaled-${Date.now()}.png`;
-      await FileSystem.downloadAsync(resultImage, fileUri);
-      await MediaLibrary.createAssetAsync(fileUri);
-      showToast("Saved to Camera Roll", "success");
+      let localUri = resultImage;
+      // If still a remote URL (fallback case), download it first
+      if (resultImage.startsWith("http")) {
+        const fileUri = (FileSystem.documentDirectory || "") + `inkform-upscaled-${Date.now()}.png`;
+        await FileSystem.downloadAsync(resultImage, fileUri);
+        localUri = fileUri;
+      }
+
+      await MediaLibrary.createAssetAsync(localUri);
+      showToast("Saved to Camera Roll ✓", "success");
     } catch (error: any) {
       showToast("Failed to save: " + error.message, "error");
     }

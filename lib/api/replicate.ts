@@ -48,9 +48,18 @@ function buildReplicateInput(req: GenerationRequest): Record<string, any> {
     input.seed = req.seed;
   }
 
-  // Batch size
+  // Batch size — only set num_outputs for models that natively support it
+  // (parallel predictions are used for others — handled in generateWithReplicate)
   if (req.batchSize > 1) {
-    input.num_outputs = req.batchSize;
+    const modelId = req.model.replicateId || "";
+    const supportsNativeBatch = [
+      "black-forest-labs/flux-schnell",
+      "black-forest-labs/flux-1.1-pro",
+      "black-forest-labs/flux-1.1-pro-ultra",
+    ].includes(modelId);
+    if (supportsNativeBatch) {
+      input.num_outputs = req.batchSize;
+    }
   }
 
   // Img2img — reference image
@@ -163,13 +172,60 @@ export async function pollReplicatePrediction(
   throw new Error("Generation timed out after 4 minutes");
 }
 
+/**
+ * Models that natively support num_outputs (return multiple images in one prediction).
+ * All others require parallel predictions.
+ */
+const NATIVE_BATCH_MODELS = new Set([
+  "black-forest-labs/flux-schnell",
+  "black-forest-labs/flux-1.1-pro",
+  "black-forest-labs/flux-1.1-pro-ultra",
+]);
+
 export async function generateWithReplicate(
   token: string,
   req: GenerationRequest,
   onProgress?: (status: string) => void
 ): Promise<string[]> {
-  const predictionId = await createReplicatePrediction(token, req);
-  return pollReplicatePrediction(token, predictionId, onProgress);
+  const modelId = req.model.replicateId || "";
+  const supportsNativeBatch = NATIVE_BATCH_MODELS.has(modelId);
+  const batchSize = req.batchSize ?? 1;
+
+  // If native batch is supported (or batch=1), use a single prediction
+  if (supportsNativeBatch || batchSize <= 1) {
+    const predictionId = await createReplicatePrediction(token, req);
+    return pollReplicatePrediction(token, predictionId, onProgress);
+  }
+
+  // For models that don't support num_outputs, run parallel predictions
+  onProgress?.("Submitting " + batchSize + " parallel predictions...");
+
+  // Create all predictions in parallel (with seed offset for variety)
+  const predictionIds = await Promise.all(
+    Array.from({ length: batchSize }, (_, i) => {
+      const batchReq: GenerationRequest = {
+        ...req,
+        batchSize: 1,
+        // Offset seed for each image so they're different (if seed is set)
+        seed: req.seed !== undefined ? req.seed + i : undefined,
+      };
+      return createReplicatePrediction(token, batchReq);
+    })
+  );
+
+  // Poll all predictions in parallel
+  let completed = 0;
+  const results = await Promise.all(
+    predictionIds.map((id) =>
+      pollReplicatePrediction(token, id, () => {
+        completed++;
+        onProgress?.(`Generating... (${completed}/${batchSize} done)`);
+      })
+    )
+  );
+
+  // Flatten results (each prediction returns an array)
+  return results.flat();
 }
 
 // ===== Upscaling =====

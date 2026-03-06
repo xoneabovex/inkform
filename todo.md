@@ -68,3 +68,5 @@
 - [x] Fix gallery fullscreen pinch-to-zoom and double-tap — added GestureHandlerRootView inside Modal, fixed gesture composition to Exclusive(Simultaneous(pinch,pan), doubleTap)
 - [x] Fix gallery image persistence — images now downloaded to permanent local filesystem (documentDirectory) at save time; 500-image cap with oldest auto-deleted
 - [x] Fix save-to-device — switched to createAssetAsync (reliable on Android); added Save All + per-image save buttons in generate results; gallery viewer and detail modal now use local URIs
+- [x] Fix APK build failure — minSdkVersion set to 24 in expo-build-properties (react-native-screens requires SDK 24)
+- [x] Fix batch generation — Replicate models now use parallel predictions for batch>1 (most FLUX models don’t support num_outputs natively); seed offset applied per image for variety

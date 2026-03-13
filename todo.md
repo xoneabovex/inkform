@@ -70,3 +70,11 @@
 - [x] Fix save-to-device — switched to createAssetAsync (reliable on Android); added Save All + per-image save buttons in generate results; gallery viewer and detail modal now use local URIs
 - [x] Fix APK build failure — minSdkVersion set to 24 in expo-build-properties (react-native-screens requires SDK 24)
 - [x] Fix batch generation — Replicate models now use parallel predictions for batch>1 (most FLUX models don’t support num_outputs natively); seed offset applied per image for variety
+- [x] Refactor: Update theme to "Cinematic Blue" palette (primary #2563EB/#3B82F6, dark bg #0A0E17)
+- [x] Refactor: Add GenerationStylePreset type and isProtected field to GalleryImage
+- [x] Refactor: Migrate gallery metadata from AsyncStorage to filesystem (inkform_gallery_metadata.json) to bypass Android 2MB SQLite limit
+- [x] Refactor: Add saveToDeviceGallery() centralized function in app-storage.ts
+- [x] Refactor: Create BottomSheet component (swipeable advanced settings panel)
+- [x] Refactor: Create shared FullscreenViewer component (extract from gallery)
+- [x] Refactor: Studio screen — useReducer for generation state, Style Presets, BottomSheet for advanced settings
+- [x] Refactor: Gallery — use shared FullscreenViewer and saveToDeviceGallery

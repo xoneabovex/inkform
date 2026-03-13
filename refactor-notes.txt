@@ -1,0 +1,34 @@
+INKFORM REFACTOR HANDOFF DOCUMENT - KEY CHANGES
+
+1. THEME: Update theme.config.js to "Cinematic Blue" palette
+   - primary: #2563EB/#3B82F6, background: #ffffff/#0A0E17, surface: #F5F5F7/#121826
+   - foreground: #11181C/#F1F5F9, muted: #687076/#94A3B8, border: #E5E7EB/#1E293B
+
+2. TYPES: Add GenerationStylePreset interface, add isProtected field to GalleryImage
+
+3. STORAGE (app-storage.ts): 
+   - Migrate gallery metadata from AsyncStorage to filesystem (inkform_gallery_metadata.json) to bypass Android 2MB SQLite limit
+   - Add saveToDeviceGallery() function using MediaLibrary.saveToLibraryAsync
+   - isProtected flag prevents auto-deletion during 500-image cap
+   - Web fallback still uses AsyncStorage
+
+4. NEW COMPONENTS:
+   - components/ui/bottom-sheet.tsx - Swipeable advanced settings panel with gesture handler
+   - components/features/fullscreen-viewer.tsx - Shared zoomable image viewer (pinch/pan/double-tap)
+
+5. STUDIO SCREEN OVERHAUL (app/(tabs)/index.tsx):
+   - Replace useState with useReducer for all generation state
+   - Add Style Presets (Anime Studio, Storyboard Photo) as horizontal chips
+   - Move advanced settings to BottomSheet instead of inline expandable
+   - Use shared FullscreenViewer for result images
+   - Simplified layout: Title, Prompt, Aspect Ratio, Style Presets, Advanced Settings button, Generate button, Results
+
+6. GALLERY CLEANUP:
+   - Replace inline fullscreen viewer with shared FullscreenViewer component
+   - Update save function to use saveToDeviceGallery()
+
+IMPORTANT NOTES:
+- The refactored Studio screen is MUCH simpler - removes model picker accordion, LoRA stack, Civitai loader, Hi-Res Fix, negative prompt presets, batch size selector from main view
+- Many advanced features are moved to the BottomSheet but the provided code only shows neg prompt, steps, cfg, seed in the sheet
+- Style Presets reference model IDs (majicmix_v7, v1_5_base) that don't exist in current catalog
+- The document's Studio screen code is truncated at the styles section

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useReducer, useEffect, useState, useCallback } from "react";
 import {
   Text,
   View,
@@ -8,21 +8,20 @@ import {
   ActivityIndicator,
   StyleSheet,
   FlatList,
-  Alert,
   Switch,
   Platform,
   Dimensions,
   Keyboard,
+  Share,
 } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-import * as MediaLibrary from "expo-media-library";
-import * as FileSystem from "expo-file-system/legacy";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { FullscreenViewer } from "@/components/features/fullscreen-viewer";
 import {
   MODEL_CATALOG,
   ALL_MODELS,
@@ -31,19 +30,20 @@ import {
   SAMPLING_METHODS,
   VAE_OPTIONS,
   type ModelInfo,
-  type EcosystemGroup,
   type LoraEntry,
   type AspectRatio,
   type SamplingMethodId,
   type VaeId,
   type GenerationRequest,
   type CivitaiModelPreview,
+  type GenerationStylePreset,
 } from "@/lib/types";
 import { generateImages } from "@/lib/api/generate";
 import { parseCivitaiId, fetchCivitaiModelVersion } from "@/lib/api/civitai";
 import {
   savePromptToHistory,
   saveImageToGallery,
+  saveToDeviceGallery,
   getReuseSettings,
   clearReuseSettings,
 } from "@/lib/storage/app-storage";
@@ -61,128 +61,219 @@ const NEG_PRESETS = [
   { label: "Face Fix", text: "deformed face, ugly face, asymmetrical eyes, cross-eyed, bad eyes, deformed iris, bad teeth, extra teeth, missing teeth" },
 ];
 
+// ===== Style Presets =====
+const STYLE_PRESETS: GenerationStylePreset[] = [
+  {
+    id: "anime-studio",
+    name: "Anime Studio",
+    description: "Optimized for anime/manga with Pony Diffusion",
+    modelId: "rp-pony",
+    config: {
+      steps: 35,
+      cfg: 6.5,
+      samplingMethod: "euler_a" as SamplingMethodId,
+      vae: "auto" as VaeId,
+      aspectRatio: ASPECT_RATIOS[0],
+    },
+    negativePromptAppend: "EasyNegative, extra fingers, poor shading",
+  },
+  {
+    id: "storyboard-photo",
+    name: "Storyboard Photo",
+    description: "Photorealistic with SD 1.x",
+    modelId: "rp-sd15",
+    config: {
+      steps: 25,
+      cfg: 8,
+      samplingMethod: "dpm++_2m_karras" as SamplingMethodId,
+      vae: "auto" as VaeId,
+      aspectRatio: ASPECT_RATIOS[2],
+    },
+    negativePromptAppend: "cartoon, graphic, illustration, low quality, sketch",
+  },
+  {
+    id: "flux-fast",
+    name: "Flux Fast",
+    description: "Quick generation with Flux Schnell",
+    modelId: "flux-1-schnell",
+    config: {
+      aspectRatio: ASPECT_RATIOS[0],
+    },
+  },
+  {
+    id: "cinematic-wide",
+    name: "Cinematic Wide",
+    description: "16:9 cinematic with Flux.2 Pro",
+    modelId: "flux-2-pro",
+    config: {
+      steps: 25,
+      aspectRatio: ASPECT_RATIOS.find((a) => a.value === "16:9") || ASPECT_RATIOS[0],
+    },
+  },
+];
+
+// ===== Reducer State =====
+interface GenState {
+  model: ModelInfo;
+  prompt: string;
+  negativePrompt: string;
+  aspectRatio: AspectRatio;
+  batchSize: number;
+  seed: number;
+  randomSeed: boolean;
+  steps: number;
+  cfg: number;
+  samplingMethod: SamplingMethodId;
+  clipSkip: number;
+  vae: VaeId;
+  matureContent: boolean;
+  referenceImage: string | null;
+  denoisingStrength: number;
+  hiResFix: boolean;
+  hiResUpscale: number;
+  hiResSteps: number;
+  hiResDenoising: number;
+  civitaiModelInput: string;
+  civitaiOverride: string;
+}
+
+const initialState: GenState = {
+  model: ALL_MODELS[0],
+  prompt: "",
+  negativePrompt: "",
+  aspectRatio: ASPECT_RATIOS[0],
+  batchSize: 1,
+  seed: -1,
+  randomSeed: true,
+  steps: 30,
+  cfg: 7,
+  samplingMethod: "euler_a",
+  clipSkip: 2,
+  vae: "auto",
+  matureContent: false,
+  referenceImage: null,
+  denoisingStrength: 0.7,
+  hiResFix: false,
+  hiResUpscale: 1.5,
+  hiResSteps: 15,
+  hiResDenoising: 0.5,
+  civitaiModelInput: "",
+  civitaiOverride: "",
+};
+
+type GenAction =
+  | { type: "SET_FIELD"; field: keyof GenState; value: any }
+  | { type: "LOAD_PRESET"; payload: Partial<GenState> }
+  | { type: "SET_MODEL"; model: ModelInfo };
+
+function genReducer(state: GenState, action: GenAction): GenState {
+  switch (action.type) {
+    case "SET_FIELD":
+      return { ...state, [action.field]: action.value };
+    case "LOAD_PRESET":
+      return { ...state, ...action.payload };
+    case "SET_MODEL": {
+      const m = action.model;
+      const updates: Partial<GenState> = { model: m };
+      if (m.defaultCfg) updates.cfg = m.defaultCfg;
+      if (m.defaultSteps) updates.steps = m.defaultSteps;
+      if (m.defaultClipSkip) updates.clipSkip = m.defaultClipSkip;
+      if (m.defaultCivitaiModelId) {
+        updates.civitaiOverride = m.defaultCivitaiModelId;
+        if (m.useLegacyCivitaiLoader) {
+          updates.civitaiModelInput = m.defaultCivitaiModelId;
+        }
+      }
+      if (!m.supportsImg2Img) updates.referenceImage = null;
+      const maxBatch = m.extraParams?.maxBatch;
+      if (maxBatch && state.batchSize > maxBatch) updates.batchSize = maxBatch;
+      return { ...state, ...updates };
+    }
+    default:
+      return state;
+  }
+}
+
 // ===== Main Screen =====
 export default function StudioScreen() {
   const colors = useColors();
   const { showToast } = useToast();
-  const insets = useSafeAreaInsets();
 
-  // Model selection
-  const [selectedModel, setSelectedModel] = useState<ModelInfo>(ALL_MODELS[0]);
+  const [state, dispatch] = useReducer(genReducer, initialState);
+  const updateField = (field: keyof GenState, value: any) =>
+    dispatch({ type: "SET_FIELD", field, value });
+
+  // Style presets
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+
+  // Model picker
   const [expandedEcosystem, setExpandedEcosystem] = useState<string | null>(null);
   const [showModelPicker, setShowModelPicker] = useState(false);
 
-  // Core params
-  const [prompt, setPrompt] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState("");
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(ASPECT_RATIOS[0]);
-  const [batchSize, setBatchSize] = useState(1);
+  // Advanced BottomSheet
+  const [showAdvancedSheet, setShowAdvancedSheet] = useState(false);
 
-  // Advanced params
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [seed, setSeed] = useState(-1);
-  const [randomSeed, setRandomSeed] = useState(true);
-  const [steps, setSteps] = useState(30);
-  const [cfg, setCfg] = useState(7);
-  const [samplingMethod, setSamplingMethod] = useState<SamplingMethodId>("euler_a");
+  // Dropdown pickers inside BottomSheet
   const [showSamplerPicker, setShowSamplerPicker] = useState(false);
-  const [clipSkip, setClipSkip] = useState(2);
-  const [vae, setVae] = useState<VaeId>("auto");
   const [showVaePicker, setShowVaePicker] = useState(false);
-  const [matureContent, setMatureContent] = useState(false);
+  const [showNegPresets, setShowNegPresets] = useState(false);
 
-  // Hi-Res Fix
-  const [hiResFix, setHiResFix] = useState(false);
-  const [hiResUpscale, setHiResUpscale] = useState(1.5);
-  const [hiResSteps, setHiResSteps] = useState(15);
-  const [hiResDenoising, setHiResDenoising] = useState(0.5);
-
-  // Civitai (Legacy loader — for SDXL/Pony/Illustrious/NoobAI)
-  const [civitaiModelInput, setCivitaiModelInput] = useState("");
+  // Civitai
   const [civitaiModelPreview, setCivitaiModelPreview] = useState<CivitaiModelPreview | null>(null);
   const [civitaiLoading, setCivitaiLoading] = useState(false);
-
-  // Civitai (Auto-routing — for other open-weight models)
-  const [civitaiOverride, setCivitaiOverride] = useState("");
 
   // LoRA stack
   const [loraEntries, setLoraEntries] = useState<LoraEntry[]>([]);
   const [loraInput, setLoraInput] = useState("");
   const [loraLoading, setLoraLoading] = useState(false);
 
-  // Reference Image (img2img)
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
-  const [denoisingStrength, setDenoisingStrength] = useState(0.7);
-
-  // Negative prompt presets
-  const [showNegPresets, setShowNegPresets] = useState(false);
-
   // Generation state
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState("");
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
 
-  // Load reuse settings on focus
+  // Fullscreen viewer
+  const [fullscreenUri, setFullscreenUri] = useState<string | null>(null);
+
+  // Load reuse settings on mount
   useEffect(() => {
-    loadReuseSettings();
+    (async () => {
+      try {
+        const settings = await getReuseSettings();
+        if (!settings) return;
+        await clearReuseSettings();
+        const payload: Partial<GenState> = {};
+        if (settings.prompt) payload.prompt = settings.prompt;
+        if (settings.negativePrompt) payload.negativePrompt = settings.negativePrompt;
+        if (settings.modelId) {
+          const m = getModelById(settings.modelId);
+          if (m) payload.model = m;
+        }
+        if (settings.aspectRatio) {
+          const ar = ASPECT_RATIOS.find((a) => a.value === settings.aspectRatio);
+          if (ar) payload.aspectRatio = ar;
+        }
+        if (settings.seed !== undefined) {
+          payload.seed = settings.seed;
+          payload.randomSeed = settings.seed === -1;
+        }
+        if (settings.cfg !== undefined) payload.cfg = settings.cfg;
+        if (settings.steps !== undefined) payload.steps = settings.steps;
+        if (settings.samplingMethod) payload.samplingMethod = settings.samplingMethod as SamplingMethodId;
+        dispatch({ type: "LOAD_PRESET", payload });
+        showToast("Settings loaded from gallery", "success");
+      } catch {}
+    })();
   }, []);
 
-  const loadReuseSettings = async () => {
-    try {
-      const settings = await getReuseSettings();
-      if (!settings) return;
-      await clearReuseSettings();
-
-      if (settings.prompt) setPrompt(settings.prompt);
-      if (settings.negativePrompt) setNegativePrompt(settings.negativePrompt);
-      if (settings.modelId) {
-        const m = getModelById(settings.modelId);
-        if (m) setSelectedModel(m);
-      }
-      if (settings.aspectRatio) {
-        const ar = ASPECT_RATIOS.find((a) => a.value === settings.aspectRatio);
-        if (ar) setAspectRatio(ar);
-      }
-      if (settings.seed !== undefined) {
-        setSeed(settings.seed);
-        setRandomSeed(settings.seed === -1);
-      }
-      if (settings.cfg !== undefined) setCfg(settings.cfg);
-      if (settings.steps !== undefined) setSteps(settings.steps);
-      if (settings.samplingMethod) setSamplingMethod(settings.samplingMethod as SamplingMethodId);
-      showToast("Settings loaded from gallery", "success");
-    } catch {}
-  };
-
-  // When model changes, update defaults
+  // When model changes via SET_MODEL, reset LoRAs if not supported
   useEffect(() => {
-    if (selectedModel.defaultCfg) setCfg(selectedModel.defaultCfg);
-    if (selectedModel.defaultSteps) setSteps(selectedModel.defaultSteps);
-    if (selectedModel.defaultClipSkip) setClipSkip(selectedModel.defaultClipSkip);
-    if (selectedModel.defaultCivitaiModelId) {
-      setCivitaiOverride(selectedModel.defaultCivitaiModelId);
-      if (selectedModel.useLegacyCivitaiLoader) {
-        setCivitaiModelInput(selectedModel.defaultCivitaiModelId);
-      }
-    }
-    // Reset LoRAs when switching to a model that doesn't support them
-    if (!selectedModel.supportsLoRAs) {
-      setLoraEntries([]);
-    }
-    // Reset reference image if model doesn't support img2img
-    if (!selectedModel.supportsImg2Img) {
-      setReferenceImage(null);
-    }
-    // Cap batch for models with maxBatch
-    const maxBatch = selectedModel.extraParams?.maxBatch;
-    if (maxBatch && batchSize > maxBatch) {
-      setBatchSize(maxBatch);
-    }
-  }, [selectedModel]);
+    if (!state.model.supportsLoRAs) setLoraEntries([]);
+  }, [state.model]);
 
   // ===== Civitai Fetch (Legacy) =====
   const handleFetchCivitaiModel = async () => {
-    const parsed = parseCivitaiId(civitaiModelInput);
+    const parsed = parseCivitaiId(state.civitaiModelInput);
     if (!parsed) {
       showToast("Invalid Civitai model ID or URL", "error");
       return;
@@ -193,7 +284,7 @@ export default function StudioScreen() {
       const preview = await fetchCivitaiModelVersion(parsed, token || undefined);
       if (preview) {
         setCivitaiModelPreview(preview);
-        setCivitaiModelInput(String(preview.id));
+        updateField("civitaiModelInput", String(preview.id));
       } else {
         showToast("Model not found on Civitai", "error");
       }
@@ -251,13 +342,13 @@ export default function StudioScreen() {
       quality: 0.9,
     });
     if (!result.canceled && result.assets[0]) {
-      setReferenceImage(result.assets[0].uri);
+      updateField("referenceImage", result.assets[0].uri);
     }
   };
 
   // ===== Generate =====
   const handleGenerate = async () => {
-    if (!prompt.trim()) {
+    if (!state.prompt.trim()) {
       showToast("Enter a prompt first", "error");
       return;
     }
@@ -267,73 +358,70 @@ export default function StudioScreen() {
     setGeneratedImages([]);
 
     try {
-      const effectiveSeed = randomSeed ? -1 : seed;
-      const maxBatch = selectedModel.extraParams?.maxBatch;
-      const effectiveBatch = maxBatch ? Math.min(batchSize, maxBatch) : batchSize;
+      const effectiveSeed = state.randomSeed ? -1 : state.seed;
+      const maxBatch = state.model.extraParams?.maxBatch;
+      const effectiveBatch = maxBatch ? Math.min(state.batchSize, maxBatch) : state.batchSize;
 
       // Determine civitai model ID
       let civitaiId: string | undefined;
-      if (selectedModel.useLegacyCivitaiLoader) {
-        civitaiId = parseCivitaiId(civitaiModelInput) || selectedModel.defaultCivitaiModelId;
-      } else if (selectedModel.provider === "runpod") {
-        civitaiId = parseCivitaiId(civitaiOverride) || selectedModel.defaultCivitaiModelId;
+      if (state.model.useLegacyCivitaiLoader) {
+        civitaiId = parseCivitaiId(state.civitaiModelInput) || state.model.defaultCivitaiModelId;
+      } else if (state.model.provider === "runpod") {
+        civitaiId = parseCivitaiId(state.civitaiOverride) || state.model.defaultCivitaiModelId;
       }
 
       const req: GenerationRequest = {
-        provider: selectedModel.provider,
-        model: selectedModel,
-        prompt: prompt.trim(),
-        negativePrompt: selectedModel.supportsNegativePrompt ? negativePrompt.trim() || undefined : undefined,
-        aspectRatio,
+        provider: state.model.provider,
+        model: state.model,
+        prompt: state.prompt.trim(),
+        negativePrompt: state.model.supportsNegativePrompt ? state.negativePrompt.trim() || undefined : undefined,
+        aspectRatio: state.aspectRatio,
         batchSize: effectiveBatch,
-        cfg: selectedModel.supportsCfg ? cfg : undefined,
-        steps: selectedModel.supportsSteps ? steps : undefined,
+        cfg: state.model.supportsCfg ? state.cfg : undefined,
+        steps: state.model.supportsSteps ? state.steps : undefined,
         seed: effectiveSeed !== -1 ? effectiveSeed : undefined,
-        samplingMethod: selectedModel.supportsSteps ? samplingMethod : undefined,
-        clipSkip: selectedModel.supportsClipSkip ? clipSkip : undefined,
-        vae: selectedModel.supportsVae ? vae : undefined,
-        hiResFix: selectedModel.supportsHiResFix ? hiResFix : undefined,
-        hiResUpscaleFactor: hiResFix ? hiResUpscale : undefined,
-        hiResSteps: hiResFix ? hiResSteps : undefined,
-        hiResDenoising: hiResFix ? hiResDenoising : undefined,
-        matureContent,
-        loraEntries: selectedModel.supportsLoRAs && loraEntries.length > 0 ? loraEntries : undefined,
+        samplingMethod: state.model.supportsSteps ? state.samplingMethod : undefined,
+        clipSkip: state.model.supportsClipSkip ? state.clipSkip : undefined,
+        vae: state.model.supportsVae ? state.vae : undefined,
+        hiResFix: state.model.supportsHiResFix ? state.hiResFix : undefined,
+        hiResUpscaleFactor: state.hiResFix ? state.hiResUpscale : undefined,
+        hiResSteps: state.hiResFix ? state.hiResSteps : undefined,
+        hiResDenoising: state.hiResFix ? state.hiResDenoising : undefined,
+        matureContent: state.matureContent,
+        loraEntries: state.model.supportsLoRAs && loraEntries.length > 0 ? loraEntries : undefined,
         civitaiModelId: civitaiId,
-        referenceImageUri: selectedModel.supportsImg2Img && referenceImage ? referenceImage : undefined,
-        denoisingStrength: referenceImage ? denoisingStrength : undefined,
+        referenceImageUri: state.model.supportsImg2Img && state.referenceImage ? state.referenceImage : undefined,
+        denoisingStrength: state.referenceImage ? state.denoisingStrength : undefined,
       };
 
       const images = await generateImages(req, setGenStatus);
 
       // Save to history and gallery (downloads to local storage)
       await savePromptToHistory({
-        prompt: prompt.trim(),
-        negativePrompt: negativePrompt.trim() || undefined,
-        provider: selectedModel.provider,
-        model: selectedModel.name,
+        prompt: state.prompt.trim(),
+        negativePrompt: state.negativePrompt.trim() || undefined,
+        provider: state.model.provider,
+        model: state.model.name,
       });
 
       const localUris: string[] = [];
       for (const uri of images) {
         const saved = await saveImageToGallery({
           uri,
-          prompt: prompt.trim(),
-          negativePrompt: negativePrompt.trim() || undefined,
-          provider: selectedModel.provider,
-          model: selectedModel.id,
-          aspectRatio: aspectRatio.value,
+          prompt: state.prompt.trim(),
+          negativePrompt: state.negativePrompt.trim() || undefined,
+          provider: state.model.provider,
+          model: state.model.id,
+          aspectRatio: state.aspectRatio.value,
           seed: effectiveSeed,
-          samplingMethod: selectedModel.supportsSteps ? samplingMethod : undefined,
-          cfg: selectedModel.supportsCfg ? cfg : undefined,
-          steps: selectedModel.supportsSteps ? steps : undefined,
+          samplingMethod: state.model.supportsSteps ? state.samplingMethod : undefined,
+          cfg: state.model.supportsCfg ? state.cfg : undefined,
+          steps: state.model.supportsSteps ? state.steps : undefined,
         });
-        // Use the local URI so the result card shows the cached image
         localUris.push(saved.uri);
       }
 
-      // Show local URIs in results (they persist even if remote URL expires)
       setGeneratedImages(localUris);
-
       showToast(`Generated ${images.length} image${images.length > 1 ? "s" : ""}`, "success");
     } catch (err: any) {
       const msg = err?.message || "Generation failed";
@@ -344,13 +432,64 @@ export default function StudioScreen() {
     }
   };
 
+  // ===== Save to camera roll =====
+  const handleNativeSave = async (uri: string) => {
+    try {
+      await saveToDeviceGallery(uri);
+      showToast("Saved to camera roll ✓", "success");
+    } catch (e: any) {
+      showToast("Failed to save: " + (e.message || "unknown"), "error");
+    }
+  };
+
+  const handleSaveAll = async () => {
+    if (Platform.OS === "web") {
+      showToast("Save not supported on web", "warning");
+      return;
+    }
+    try {
+      let saved = 0;
+      for (const uri of generatedImages) {
+        await saveToDeviceGallery(uri);
+        saved++;
+      }
+      showToast(`Saved ${saved} image${saved > 1 ? "s" : ""} to camera roll ✓`, "success");
+    } catch (e: any) {
+      showToast("Failed to save: " + (e.message || "unknown"), "error");
+    }
+  };
+
+  // ===== Apply Style Preset =====
+  const handleApplyPreset = (preset: GenerationStylePreset) => {
+    setActivePresetId(preset.id);
+    const targetModel = getModelById(preset.modelId);
+    if (targetModel) {
+      dispatch({ type: "SET_MODEL", model: targetModel });
+    }
+    // Apply config overrides
+    const payload: Partial<GenState> = {};
+    if (preset.config.steps !== undefined) payload.steps = preset.config.steps;
+    if (preset.config.cfg !== undefined) payload.cfg = preset.config.cfg;
+    if (preset.config.samplingMethod) payload.samplingMethod = preset.config.samplingMethod as SamplingMethodId;
+    if (preset.config.vae) payload.vae = preset.config.vae as VaeId;
+    if (preset.config.aspectRatio) payload.aspectRatio = preset.config.aspectRatio;
+    dispatch({ type: "LOAD_PRESET", payload });
+    // Append negative prompt if specified
+    if (preset.negativePromptAppend) {
+      updateField(
+        "negativePrompt",
+        state.negativePrompt
+          ? state.negativePrompt + ", " + preset.negativePromptAppend
+          : preset.negativePromptAppend
+      );
+    }
+    showToast(`${preset.name} applied ✓`, "success");
+  };
+
   // ===== Helpers =====
-  const arch = selectedModel.architecture;
-  const isApi = arch === "api";
-  const isFlux = arch === "flux";
-  const isLegacyCivitai = !!selectedModel.useLegacyCivitaiLoader;
-  const isRunPod = selectedModel.provider === "runpod";
-  const showCivitaiEnhancements = isRunPod && !isLegacyCivitai && !isApi;
+  const isLegacyCivitai = !!state.model.useLegacyCivitaiLoader;
+  const isRunPod = state.model.provider === "runpod";
+  const showCivitaiEnhancements = isRunPod && !isLegacyCivitai && state.model.architecture !== "api";
 
   // ===== Render =====
   return (
@@ -369,8 +508,8 @@ export default function StudioScreen() {
           style={[styles.pickerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
           <View style={{ flex: 1 }}>
-            <Text style={[styles.pickerLabel, { color: colors.muted }]}>{selectedModel.ecosystem}</Text>
-            <Text style={[styles.pickerValue, { color: colors.foreground }]}>{selectedModel.name}</Text>
+            <Text style={[styles.pickerLabel, { color: colors.muted }]}>{state.model.ecosystem}</Text>
+            <Text style={[styles.pickerValue, { color: colors.foreground }]}>{state.model.name}</Text>
           </View>
           <Text style={{ color: colors.muted, fontSize: 18 }}>{showModelPicker ? "▲" : "▼"}</Text>
         </TouchableOpacity>
@@ -397,20 +536,21 @@ export default function StudioScreen() {
                       <TouchableOpacity
                         key={model.id}
                         onPress={() => {
-                          setSelectedModel(model);
+                          dispatch({ type: "SET_MODEL", model });
                           setShowModelPicker(false);
                           setExpandedEcosystem(null);
+                          setActivePresetId(null);
                         }}
                         style={[
                           styles.accordionItem,
                           { borderBottomColor: colors.border },
-                          model.id === selectedModel.id && { backgroundColor: colors.primary + "20" },
+                          model.id === state.model.id && { backgroundColor: colors.primary + "20" },
                         ]}
                       >
                         <Text
                           style={[
                             styles.accordionItemText,
-                            { color: model.id === selectedModel.id ? colors.primary : colors.foreground },
+                            { color: model.id === state.model.id ? colors.primary : colors.foreground },
                           ]}
                         >
                           {model.name}
@@ -430,8 +570,8 @@ export default function StudioScreen() {
         <Text style={[styles.label, { color: colors.muted }]}>PROMPT</Text>
         <TextInput
           style={[styles.promptInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
-          value={prompt}
-          onChangeText={setPrompt}
+          value={state.prompt}
+          onChangeText={(t) => updateField("prompt", t)}
           placeholder="Describe your image..."
           placeholderTextColor={colors.muted}
           multiline
@@ -440,7 +580,7 @@ export default function StudioScreen() {
         />
 
         {/* ===== Reference Image (img2img) ===== */}
-        {selectedModel.supportsImg2Img && (
+        {state.model.supportsImg2Img && (
           <View style={styles.section}>
             <Text style={[styles.label, { color: colors.muted }]}>REFERENCE IMAGE</Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -448,35 +588,35 @@ export default function StudioScreen() {
                 onPress={handlePickReferenceImage}
                 style={[styles.refImageBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               >
-                {referenceImage ? (
-                  <Image source={{ uri: referenceImage }} style={styles.refImageThumb} contentFit="cover" />
+                {state.referenceImage ? (
+                  <Image source={{ uri: state.referenceImage }} style={styles.refImageThumb} contentFit="cover" />
                 ) : (
                   <Text style={{ color: colors.muted, fontSize: 13 }}>Tap to select</Text>
                 )}
               </TouchableOpacity>
-              {referenceImage && (
-                <TouchableOpacity onPress={() => setReferenceImage(null)}>
+              {state.referenceImage && (
+                <TouchableOpacity onPress={() => updateField("referenceImage", null)}>
                   <Text style={{ color: colors.error, fontSize: 13, fontWeight: "600" }}>Remove</Text>
                 </TouchableOpacity>
               )}
             </View>
-            {referenceImage && (
-              <View style={styles.sliderRow}>
-                <Text style={[styles.advLabel, { color: colors.muted }]}>Denoising Strength</Text>
-                <Text style={[styles.sliderValue, { color: colors.foreground }]}>{denoisingStrength.toFixed(2)}</Text>
-              </View>
-            )}
-            {referenceImage && (
-              <TextInput
-                style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
-                value={String(denoisingStrength)}
-                onChangeText={(t) => {
-                  const v = parseFloat(t);
-                  if (!isNaN(v) && v >= 0 && v <= 1) setDenoisingStrength(v);
-                }}
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-              />
+            {state.referenceImage && (
+              <>
+                <View style={styles.sliderRow}>
+                  <Text style={[styles.advLabel, { color: colors.muted }]}>Denoising Strength</Text>
+                  <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.denoisingStrength.toFixed(2)}</Text>
+                </View>
+                <TextInput
+                  style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
+                  value={String(state.denoisingStrength)}
+                  onChangeText={(t) => {
+                    const v = parseFloat(t);
+                    if (!isNaN(v) && v >= 0 && v <= 1) updateField("denoisingStrength", v);
+                  }}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                />
+              </>
             )}
           </View>
         )}
@@ -487,19 +627,14 @@ export default function StudioScreen() {
           {ASPECT_RATIOS.map((ar) => (
             <TouchableOpacity
               key={ar.value}
-              onPress={() => setAspectRatio(ar)}
+              onPress={() => { updateField("aspectRatio", ar); setActivePresetId(null); }}
               style={[
                 styles.chip,
                 { borderColor: colors.border },
-                ar.value === aspectRatio.value && { backgroundColor: colors.primary, borderColor: colors.primary },
+                ar.value === state.aspectRatio.value && { backgroundColor: colors.primary, borderColor: colors.primary },
               ]}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  { color: ar.value === aspectRatio.value ? "#fff" : colors.foreground },
-                ]}
-              >
+              <Text style={{ color: ar.value === state.aspectRatio.value ? "#fff" : colors.foreground, fontWeight: "600" }}>
                 {ar.label}
               </Text>
             </TouchableOpacity>
@@ -510,27 +645,60 @@ export default function StudioScreen() {
         <Text style={[styles.label, { color: colors.muted }]}>BATCH SIZE</Text>
         <View style={styles.chipRow}>
           {[1, 2, 3, 4].map((n) => {
-            const maxBatch = selectedModel.extraParams?.maxBatch;
+            const maxBatch = state.model.extraParams?.maxBatch;
             const disabled = maxBatch ? n > maxBatch : false;
             return (
               <TouchableOpacity
                 key={n}
-                onPress={() => !disabled && setBatchSize(n)}
+                onPress={() => !disabled && updateField("batchSize", n)}
                 disabled={disabled}
                 style={[
                   styles.chip,
                   { borderColor: colors.border },
-                  n === batchSize && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  n === state.batchSize && { backgroundColor: colors.primary, borderColor: colors.primary },
                   disabled && { opacity: 0.3 },
                 ]}
               >
-                <Text style={[styles.chipText, { color: n === batchSize ? "#fff" : colors.foreground }]}>{n}</Text>
+                <Text style={{ color: n === state.batchSize ? "#fff" : colors.foreground, fontWeight: "600" }}>{n}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
 
-        {/* ===== Legacy Civitai Loader (Phase 3) ===== */}
+        {/* ===== Style Presets ===== */}
+        <Text style={[styles.label, { color: colors.muted, marginTop: 24 }]}>STYLE PRESETS</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+          <TouchableOpacity
+            onPress={() => {
+              dispatch({ type: "LOAD_PRESET", payload: initialState });
+              setActivePresetId(null);
+            }}
+            style={[
+              styles.chip,
+              { borderColor: colors.border },
+              !activePresetId && { backgroundColor: colors.surface },
+            ]}
+          >
+            <Text style={{ color: !activePresetId ? colors.foreground : colors.muted, fontWeight: "500" }}>Default</Text>
+          </TouchableOpacity>
+          {STYLE_PRESETS.map((preset) => (
+            <TouchableOpacity
+              key={preset.id}
+              onPress={() => handleApplyPreset(preset)}
+              style={[
+                styles.chip,
+                { borderColor: colors.border },
+                activePresetId === preset.id && { backgroundColor: colors.primary, borderColor: colors.primary },
+              ]}
+            >
+              <Text style={{ color: activePresetId === preset.id ? "#fff" : colors.foreground, fontWeight: "600" }}>
+                {preset.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* ===== Legacy Civitai Loader ===== */}
         {isLegacyCivitai && (
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sectionCardTitle, { color: colors.foreground }]}>Civitai Model</Text>
@@ -540,8 +708,8 @@ export default function StudioScreen() {
             <View style={styles.fetchRow}>
               <TextInput
                 style={[styles.fetchInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                value={civitaiModelInput}
-                onChangeText={setCivitaiModelInput}
+                value={state.civitaiModelInput}
+                onChangeText={(t) => updateField("civitaiModelInput", t)}
                 placeholder="Model ID or URL"
                 placeholderTextColor={colors.muted}
                 autoCapitalize="none"
@@ -584,7 +752,7 @@ export default function StudioScreen() {
                 colors={colors}
                 onWeightChange={(w) => handleLoraWeightChange(lora.id, w)}
                 onRemove={() => handleRemoveLora(lora.id)}
-                onInsertTrigger={(words) => setPrompt((p) => p + " " + words.join(", "))}
+                onInsertTrigger={(words) => updateField("prompt", state.prompt + " " + words.join(", "))}
               />
             ))}
             <View style={styles.fetchRow}>
@@ -612,7 +780,7 @@ export default function StudioScreen() {
           </View>
         )}
 
-        {/* ===== Auto Civitai Routing (Phase 4) ===== */}
+        {/* ===== Auto Civitai Routing ===== */}
         {showCivitaiEnhancements && (
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sectionCardTitle, { color: colors.foreground }]}>Civitai Enhancements</Text>
@@ -621,8 +789,8 @@ export default function StudioScreen() {
             </Text>
             <TextInput
               style={[styles.singleInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-              value={civitaiOverride}
-              onChangeText={setCivitaiOverride}
+              value={state.civitaiOverride}
+              onChangeText={(t) => updateField("civitaiOverride", t)}
               placeholder="Civitai Model Version ID"
               placeholderTextColor={colors.muted}
               autoCapitalize="none"
@@ -630,7 +798,7 @@ export default function StudioScreen() {
             />
 
             {/* Dynamic LoRA Stack */}
-            {selectedModel.supportsLoRAs && (
+            {state.model.supportsLoRAs && (
               <>
                 <Text style={[styles.sectionCardSubtitle, { color: colors.foreground, marginTop: 14 }]}>LoRA Stack</Text>
                 {loraEntries.map((lora) => (
@@ -640,7 +808,7 @@ export default function StudioScreen() {
                     colors={colors}
                     onWeightChange={(w) => handleLoraWeightChange(lora.id, w)}
                     onRemove={() => handleRemoveLora(lora.id)}
-                    onInsertTrigger={(words) => setPrompt((p) => p + " " + words.join(", "))}
+                    onInsertTrigger={(words) => updateField("prompt", state.prompt + " " + words.join(", "))}
                   />
                 ))}
                 <View style={styles.fetchRow}>
@@ -670,282 +838,15 @@ export default function StudioScreen() {
           </View>
         )}
 
-        {/* ===== Advanced Options ===== */}
-        <TouchableOpacity
-          onPress={() => setShowAdvanced(!showAdvanced)}
-          style={styles.advancedToggle}
-        >
-          <Text style={[styles.advancedToggleText, { color: colors.primary }]}>
-            Advanced Settings {showAdvanced ? "▲" : "▼"}
-          </Text>
-        </TouchableOpacity>
-
-        {showAdvanced && (
-          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {/* Negative Prompt — show for SDXL/SD15/Other, hide for FLUX/API */}
-            {selectedModel.supportsNegativePrompt && (
-              <>
-                <View style={styles.negHeaderRow}>
-                  <Text style={[styles.advLabel, { color: colors.muted }]}>NEGATIVE PROMPT</Text>
-                  <TouchableOpacity onPress={() => setShowNegPresets(!showNegPresets)}>
-                    <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>
-                      {showNegPresets ? "Hide Presets" : "Presets"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                {showNegPresets && (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                    {NEG_PRESETS.map((p) => (
-                      <TouchableOpacity
-                        key={p.label}
-                        onPress={() => setNegativePrompt(p.text)}
-                        style={[styles.presetChip, { borderColor: colors.border }]}
-                      >
-                        <Text style={[styles.presetChipText, { color: colors.foreground }]}>{p.label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                )}
-                <TextInput
-                  style={[styles.promptInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border, minHeight: 60 }]}
-                  value={negativePrompt}
-                  onChangeText={setNegativePrompt}
-                  placeholder="Things to avoid..."
-                  placeholderTextColor={colors.muted}
-                  multiline
-                  textAlignVertical="top"
-                />
-              </>
-            )}
-
-            {/* Seed */}
-            <View style={styles.seedRow}>
-              <Text style={[styles.advLabel, { color: colors.muted }]}>SEED</Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>Random</Text>
-                <Switch
-                  value={randomSeed}
-                  onValueChange={setRandomSeed}
-                  trackColor={{ false: colors.border, true: colors.primary }}
-                  thumbColor="#fff"
-                />
-              </View>
-            </View>
-            {!randomSeed && (
-              <TextInput
-                style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                value={String(seed)}
-                onChangeText={(t) => {
-                  const v = parseInt(t);
-                  if (!isNaN(v)) setSeed(v);
-                  else if (t === "" || t === "-") setSeed(-1);
-                }}
-                keyboardType="number-pad"
-                returnKeyType="done"
-              />
-            )}
-
-            {/* Steps — hide for API models */}
-            {selectedModel.supportsSteps && (
-              <>
-                <View style={styles.sliderRow}>
-                  <Text style={[styles.advLabel, { color: colors.muted }]}>STEPS</Text>
-                  <Text style={[styles.sliderValue, { color: colors.foreground }]}>{steps}</Text>
-                </View>
-                <TextInput
-                  style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                  value={String(steps)}
-                  onChangeText={(t) => {
-                    const v = parseInt(t);
-                    if (!isNaN(v) && v >= 1 && v <= (selectedModel.stepsRange?.[1] || 100)) setSteps(v);
-                  }}
-                  keyboardType="number-pad"
-                  returnKeyType="done"
-                />
-              </>
-            )}
-
-            {/* CFG Scale — hide for API models */}
-            {selectedModel.supportsCfg && (
-              <>
-                <View style={styles.sliderRow}>
-                  <Text style={[styles.advLabel, { color: colors.muted }]}>CFG SCALE</Text>
-                  <Text style={[styles.sliderValue, { color: colors.foreground }]}>{cfg}</Text>
-                </View>
-                <TextInput
-                  style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                  value={String(cfg)}
-                  onChangeText={(t) => {
-                    const v = parseFloat(t);
-                    if (!isNaN(v) && v >= 1 && v <= (selectedModel.cfgRange?.[1] || 30)) setCfg(v);
-                  }}
-                  keyboardType="decimal-pad"
-                  returnKeyType="done"
-                />
-              </>
-            )}
-
-            {/* Sampler — hide for API models */}
-            {selectedModel.supportsSteps && (
-              <>
-                <Text style={[styles.advLabel, { color: colors.muted, marginTop: 12 }]}>SAMPLER</Text>
-                <TouchableOpacity
-                  onPress={() => setShowSamplerPicker(!showSamplerPicker)}
-                  style={[styles.dropdownBtn, { backgroundColor: colors.background, borderColor: colors.border }]}
-                >
-                  <Text style={{ color: colors.foreground, fontSize: 14 }}>
-                    {SAMPLING_METHODS.find((s) => s.id === samplingMethod)?.label || samplingMethod}
-                  </Text>
-                  <Text style={{ color: colors.muted }}>▼</Text>
-                </TouchableOpacity>
-                {showSamplerPicker && (
-                  <View style={[styles.dropdownList, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                    {SAMPLING_METHODS.map((s) => (
-                      <TouchableOpacity
-                        key={s.id}
-                        onPress={() => {
-                          setSamplingMethod(s.id);
-                          setShowSamplerPicker(false);
-                        }}
-                        style={[styles.dropdownItem, s.id === samplingMethod && { backgroundColor: colors.primary + "20" }]}
-                      >
-                        <Text style={{ color: s.id === samplingMethod ? colors.primary : colors.foreground, fontSize: 14 }}>
-                          {s.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-              </>
-            )}
-
-            {/* Clip Skip — SDXL/SD15 only */}
-            {selectedModel.supportsClipSkip && (
-              <>
-                <View style={styles.sliderRow}>
-                  <Text style={[styles.advLabel, { color: colors.muted }]}>CLIP SKIP</Text>
-                  <Text style={[styles.sliderValue, { color: colors.foreground }]}>{clipSkip}</Text>
-                </View>
-                <TextInput
-                  style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                  value={String(clipSkip)}
-                  onChangeText={(t) => {
-                    const v = parseInt(t);
-                    if (!isNaN(v) && v >= 1 && v <= 12) setClipSkip(v);
-                  }}
-                  keyboardType="number-pad"
-                  returnKeyType="done"
-                />
-              </>
-            )}
-
-            {/* VAE — SDXL/SD15 only */}
-            {selectedModel.supportsVae && (
-              <>
-                <Text style={[styles.advLabel, { color: colors.muted, marginTop: 12 }]}>VAE</Text>
-                <TouchableOpacity
-                  onPress={() => setShowVaePicker(!showVaePicker)}
-                  style={[styles.dropdownBtn, { backgroundColor: colors.background, borderColor: colors.border }]}
-                >
-                  <Text style={{ color: colors.foreground, fontSize: 14 }}>
-                    {VAE_OPTIONS.find((v) => v.id === vae)?.label || vae}
-                  </Text>
-                  <Text style={{ color: colors.muted }}>▼</Text>
-                </TouchableOpacity>
-                {showVaePicker && (
-                  <View style={[styles.dropdownList, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                    {VAE_OPTIONS.map((v) => (
-                      <TouchableOpacity
-                        key={v.id}
-                        onPress={() => {
-                          setVae(v.id);
-                          setShowVaePicker(false);
-                        }}
-                        style={[styles.dropdownItem, v.id === vae && { backgroundColor: colors.primary + "20" }]}
-                      >
-                        <Text style={{ color: v.id === vae ? colors.primary : colors.foreground, fontSize: 14 }}>
-                          {v.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-              </>
-            )}
-
-            {/* Hi-Res Fix — SDXL/SD15 only */}
-            {selectedModel.supportsHiResFix && (
-              <>
-                <View style={[styles.seedRow, { marginTop: 14 }]}>
-                  <Text style={[styles.advLabel, { color: colors.muted }]}>HI-RES FIX</Text>
-                  <Switch
-                    value={hiResFix}
-                    onValueChange={setHiResFix}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor="#fff"
-                  />
-                </View>
-                {hiResFix && (
-                  <View style={{ gap: 8, marginTop: 8 }}>
-                    <View style={styles.sliderRow}>
-                      <Text style={[styles.advLabel, { color: colors.muted }]}>Upscale Factor</Text>
-                      <Text style={[styles.sliderValue, { color: colors.foreground }]}>{hiResUpscale.toFixed(1)}x</Text>
-                    </View>
-                    <TextInput
-                      style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                      value={String(hiResUpscale)}
-                      onChangeText={(t) => {
-                        const v = parseFloat(t);
-                        if (!isNaN(v) && v >= 1 && v <= 4) setHiResUpscale(v);
-                      }}
-                      keyboardType="decimal-pad"
-                      returnKeyType="done"
-                    />
-                    <View style={styles.sliderRow}>
-                      <Text style={[styles.advLabel, { color: colors.muted }]}>Hires Steps</Text>
-                      <Text style={[styles.sliderValue, { color: colors.foreground }]}>{hiResSteps}</Text>
-                    </View>
-                    <TextInput
-                      style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                      value={String(hiResSteps)}
-                      onChangeText={(t) => {
-                        const v = parseInt(t);
-                        if (!isNaN(v) && v >= 1 && v <= 100) setHiResSteps(v);
-                      }}
-                      keyboardType="number-pad"
-                      returnKeyType="done"
-                    />
-                    <View style={styles.sliderRow}>
-                      <Text style={[styles.advLabel, { color: colors.muted }]}>Denoising</Text>
-                      <Text style={[styles.sliderValue, { color: colors.foreground }]}>{hiResDenoising.toFixed(2)}</Text>
-                    </View>
-                    <TextInput
-                      style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
-                      value={String(hiResDenoising)}
-                      onChangeText={(t) => {
-                        const v = parseFloat(t);
-                        if (!isNaN(v) && v >= 0 && v <= 1) setHiResDenoising(v);
-                      }}
-                      keyboardType="decimal-pad"
-                      returnKeyType="done"
-                    />
-                  </View>
-                )}
-              </>
-            )}
-
-            {/* Mature Content Toggle */}
-            <View style={[styles.seedRow, { marginTop: 14 }]}>
-              <Text style={[styles.advLabel, { color: colors.muted }]}>MATURE CONTENT</Text>
-              <Switch
-                value={matureContent}
-                onValueChange={setMatureContent}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#fff"
-              />
-            </View>
-          </View>
-        )}
+        {/* ===== Advanced Settings Button ===== */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            onPress={() => setShowAdvancedSheet(true)}
+            style={[styles.advancedBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Text style={{ color: colors.foreground, fontWeight: "600" }}>⚙️ Advanced Settings</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* ===== Generate Button ===== */}
         <TouchableOpacity
@@ -967,30 +868,9 @@ export default function StudioScreen() {
         {generatedImages.length > 0 && (
           <View style={styles.resultsSection}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <Text style={[styles.label, { color: colors.muted }]}>RESULTS</Text>
+              <Text style={[styles.label, { color: colors.muted, marginTop: 0 }]}>RESULTS</Text>
               <TouchableOpacity
-                onPress={async () => {
-                  if (Platform.OS === "web") { showToast("Save not supported on web", "warning"); return; }
-                  try {
-                    const { status } = await MediaLibrary.requestPermissionsAsync();
-                    if (status !== "granted") { showToast("Camera roll permission denied", "error"); return; }
-                    let saved = 0;
-                    for (const uri of generatedImages) {
-                      let localUri = uri;
-                      if (uri.startsWith("http")) {
-                        const ext = uri.includes(".png") ? "png" : "jpg";
-                        const dest = (FileSystem.cacheDirectory || "") + `inkform_save_${Date.now()}_${saved}.${ext}`;
-                        const { uri: dl } = await FileSystem.downloadAsync(uri, dest);
-                        localUri = dl;
-                      }
-                      await MediaLibrary.createAssetAsync(localUri);
-                      saved++;
-                    }
-                    showToast(`Saved ${saved} image${saved > 1 ? "s" : ""} to camera roll ✓`, "success");
-                  } catch (e: any) {
-                    showToast("Failed to save: " + (e.message || "unknown"), "error");
-                  }
-                }}
+                onPress={handleSaveAll}
                 style={[styles.saveAllBtn, { backgroundColor: colors.primary }]}
               >
                 <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>💾 Save All</Text>
@@ -1002,32 +882,18 @@ export default function StudioScreen() {
               showsHorizontalScrollIndicator={false}
               keyExtractor={(_, i) => String(i)}
               renderItem={({ item }) => (
-                <View style={[styles.resultCard, { borderColor: colors.border }]}>
+                <TouchableOpacity
+                  style={[styles.resultCard, { borderColor: colors.border }]}
+                  onPress={() => setFullscreenUri(item)}
+                >
                   <Image source={{ uri: item }} style={styles.resultImage} contentFit="cover" />
                   <TouchableOpacity
-                    onPress={async () => {
-                      if (Platform.OS === "web") { showToast("Save not supported on web", "warning"); return; }
-                      try {
-                        const { status } = await MediaLibrary.requestPermissionsAsync();
-                        if (status !== "granted") { showToast("Camera roll permission denied", "error"); return; }
-                        let localUri = item;
-                        if (item.startsWith("http")) {
-                          const ext = item.includes(".png") ? "png" : "jpg";
-                          const dest = (FileSystem.cacheDirectory || "") + `inkform_save_${Date.now()}.${ext}`;
-                          const { uri: dl } = await FileSystem.downloadAsync(item, dest);
-                          localUri = dl;
-                        }
-                        await MediaLibrary.createAssetAsync(localUri);
-                        showToast("Saved to camera roll ✓", "success");
-                      } catch (e: any) {
-                        showToast("Failed to save: " + (e.message || "unknown"), "error");
-                      }
-                    }}
+                    onPress={() => handleNativeSave(item)}
                     style={[styles.resultSaveBtn, { backgroundColor: "rgba(0,0,0,0.55)" }]}
                   >
                     <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>💾</Text>
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               )}
             />
           </View>
@@ -1035,6 +901,313 @@ export default function StudioScreen() {
 
         <View style={{ height: 80 }} />
       </ScrollView>
+
+      {/* ===== Advanced Settings BottomSheet ===== */}
+      <BottomSheet
+        isVisible={showAdvancedSheet}
+        onClose={() => {
+          setShowAdvancedSheet(false);
+          setShowSamplerPicker(false);
+          setShowVaePicker(false);
+          setShowNegPresets(false);
+        }}
+        colors={colors}
+        heightRatio={0.8}
+      >
+        <ScrollView
+          style={styles.sheetContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+          <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Advanced Settings</Text>
+
+          {/* Negative Prompt */}
+          {state.model.supportsNegativePrompt && (
+            <>
+              <View style={styles.negHeaderRow}>
+                <Text style={[styles.advLabel, { color: colors.muted }]}>NEGATIVE PROMPT</Text>
+                <TouchableOpacity onPress={() => setShowNegPresets(!showNegPresets)}>
+                  <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>
+                    {showNegPresets ? "Hide Presets" : "Presets"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {showNegPresets && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                  {NEG_PRESETS.map((p) => (
+                    <TouchableOpacity
+                      key={p.label}
+                      onPress={() => updateField("negativePrompt", p.text)}
+                      style={[styles.presetChip, { borderColor: colors.border }]}
+                    >
+                      <Text style={[styles.presetChipText, { color: colors.foreground }]}>{p.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              <TextInput
+                style={[styles.promptInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border, minHeight: 60 }]}
+                value={state.negativePrompt}
+                onChangeText={(t) => updateField("negativePrompt", t)}
+                placeholder="Things to avoid..."
+                placeholderTextColor={colors.muted}
+                multiline
+                textAlignVertical="top"
+              />
+            </>
+          )}
+
+          {/* Seed */}
+          <View style={styles.seedRow}>
+            <Text style={[styles.advLabel, { color: colors.muted }]}>SEED</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>Random</Text>
+              <Switch
+                value={state.randomSeed}
+                onValueChange={(v) => updateField("randomSeed", v)}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#fff"
+              />
+            </View>
+          </View>
+          {!state.randomSeed && (
+            <TextInput
+              style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+              value={String(state.seed)}
+              onChangeText={(t) => {
+                const v = parseInt(t);
+                if (!isNaN(v)) updateField("seed", v);
+                else if (t === "" || t === "-") updateField("seed", -1);
+              }}
+              keyboardType="number-pad"
+              returnKeyType="done"
+            />
+          )}
+
+          {/* Steps */}
+          {state.model.supportsSteps && (
+            <>
+              <View style={styles.sliderRow}>
+                <Text style={[styles.advLabel, { color: colors.muted }]}>STEPS</Text>
+                <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.steps}</Text>
+              </View>
+              <TextInput
+                style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+                value={String(state.steps)}
+                onChangeText={(t) => {
+                  const v = parseInt(t);
+                  if (!isNaN(v) && v >= 1 && v <= (state.model.stepsRange?.[1] || 100)) updateField("steps", v);
+                }}
+                keyboardType="number-pad"
+                returnKeyType="done"
+              />
+            </>
+          )}
+
+          {/* CFG Scale */}
+          {state.model.supportsCfg && (
+            <>
+              <View style={styles.sliderRow}>
+                <Text style={[styles.advLabel, { color: colors.muted }]}>CFG SCALE</Text>
+                <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.cfg}</Text>
+              </View>
+              <TextInput
+                style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+                value={String(state.cfg)}
+                onChangeText={(t) => {
+                  const v = parseFloat(t);
+                  if (!isNaN(v) && v >= 1 && v <= (state.model.cfgRange?.[1] || 30)) updateField("cfg", v);
+                }}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+              />
+            </>
+          )}
+
+          {/* Sampler */}
+          {state.model.supportsSteps && (
+            <>
+              <Text style={[styles.advLabel, { color: colors.muted, marginTop: 12 }]}>SAMPLER</Text>
+              <TouchableOpacity
+                onPress={() => setShowSamplerPicker(!showSamplerPicker)}
+                style={[styles.dropdownBtn, { backgroundColor: colors.background, borderColor: colors.border }]}
+              >
+                <Text style={{ color: colors.foreground, fontSize: 14 }}>
+                  {SAMPLING_METHODS.find((s) => s.id === state.samplingMethod)?.label || state.samplingMethod}
+                </Text>
+                <Text style={{ color: colors.muted }}>▼</Text>
+              </TouchableOpacity>
+              {showSamplerPicker && (
+                <View style={[styles.dropdownList, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  {SAMPLING_METHODS.map((s) => (
+                    <TouchableOpacity
+                      key={s.id}
+                      onPress={() => {
+                        updateField("samplingMethod", s.id);
+                        setShowSamplerPicker(false);
+                      }}
+                      style={[styles.dropdownItem, s.id === state.samplingMethod && { backgroundColor: colors.primary + "20" }]}
+                    >
+                      <Text style={{ color: s.id === state.samplingMethod ? colors.primary : colors.foreground, fontSize: 14 }}>
+                        {s.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+
+          {/* Clip Skip */}
+          {state.model.supportsClipSkip && (
+            <>
+              <View style={styles.sliderRow}>
+                <Text style={[styles.advLabel, { color: colors.muted }]}>CLIP SKIP</Text>
+                <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.clipSkip}</Text>
+              </View>
+              <TextInput
+                style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+                value={String(state.clipSkip)}
+                onChangeText={(t) => {
+                  const v = parseInt(t);
+                  if (!isNaN(v) && v >= 1 && v <= 12) updateField("clipSkip", v);
+                }}
+                keyboardType="number-pad"
+                returnKeyType="done"
+              />
+            </>
+          )}
+
+          {/* VAE */}
+          {state.model.supportsVae && (
+            <>
+              <Text style={[styles.advLabel, { color: colors.muted, marginTop: 12 }]}>VAE</Text>
+              <TouchableOpacity
+                onPress={() => setShowVaePicker(!showVaePicker)}
+                style={[styles.dropdownBtn, { backgroundColor: colors.background, borderColor: colors.border }]}
+              >
+                <Text style={{ color: colors.foreground, fontSize: 14 }}>
+                  {VAE_OPTIONS.find((v) => v.id === state.vae)?.label || state.vae}
+                </Text>
+                <Text style={{ color: colors.muted }}>▼</Text>
+              </TouchableOpacity>
+              {showVaePicker && (
+                <View style={[styles.dropdownList, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  {VAE_OPTIONS.map((v) => (
+                    <TouchableOpacity
+                      key={v.id}
+                      onPress={() => {
+                        updateField("vae", v.id);
+                        setShowVaePicker(false);
+                      }}
+                      style={[styles.dropdownItem, v.id === state.vae && { backgroundColor: colors.primary + "20" }]}
+                    >
+                      <Text style={{ color: v.id === state.vae ? colors.primary : colors.foreground, fontSize: 14 }}>
+                        {v.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+
+          {/* Hi-Res Fix */}
+          {state.model.supportsHiResFix && (
+            <>
+              <View style={[styles.seedRow, { marginTop: 14 }]}>
+                <Text style={[styles.advLabel, { color: colors.muted }]}>HI-RES FIX</Text>
+                <Switch
+                  value={state.hiResFix}
+                  onValueChange={(v) => updateField("hiResFix", v)}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor="#fff"
+                />
+              </View>
+              {state.hiResFix && (
+                <View style={{ gap: 8, marginTop: 8 }}>
+                  <View style={styles.sliderRow}>
+                    <Text style={[styles.advLabel, { color: colors.muted }]}>Upscale Factor</Text>
+                    <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.hiResUpscale.toFixed(1)}x</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+                    value={String(state.hiResUpscale)}
+                    onChangeText={(t) => {
+                      const v = parseFloat(t);
+                      if (!isNaN(v) && v >= 1 && v <= 4) updateField("hiResUpscale", v);
+                    }}
+                    keyboardType="decimal-pad"
+                    returnKeyType="done"
+                  />
+                  <View style={styles.sliderRow}>
+                    <Text style={[styles.advLabel, { color: colors.muted }]}>Hires Steps</Text>
+                    <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.hiResSteps}</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+                    value={String(state.hiResSteps)}
+                    onChangeText={(t) => {
+                      const v = parseInt(t);
+                      if (!isNaN(v) && v >= 1 && v <= 100) updateField("hiResSteps", v);
+                    }}
+                    keyboardType="number-pad"
+                    returnKeyType="done"
+                  />
+                  <View style={styles.sliderRow}>
+                    <Text style={[styles.advLabel, { color: colors.muted }]}>Denoising</Text>
+                    <Text style={[styles.sliderValue, { color: colors.foreground }]}>{state.hiResDenoising.toFixed(2)}</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.numInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+                    value={String(state.hiResDenoising)}
+                    onChangeText={(t) => {
+                      const v = parseFloat(t);
+                      if (!isNaN(v) && v >= 0 && v <= 1) updateField("hiResDenoising", v);
+                    }}
+                    keyboardType="decimal-pad"
+                    returnKeyType="done"
+                  />
+                </View>
+              )}
+            </>
+          )}
+
+          {/* Mature Content Toggle */}
+          <View style={[styles.seedRow, { marginTop: 14 }]}>
+            <Text style={[styles.advLabel, { color: colors.muted }]}>MATURE CONTENT</Text>
+            <Switch
+              value={state.matureContent}
+              onValueChange={(v) => updateField("matureContent", v)}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          <View style={{ height: 60 }} />
+        </ScrollView>
+      </BottomSheet>
+
+      {/* ===== Fullscreen Viewer ===== */}
+      {fullscreenUri && (
+        <FullscreenViewer
+          image={{
+            uri: fullscreenUri,
+            prompt: state.prompt,
+            model: state.model.name,
+            provider: state.model.provider,
+          } as any}
+          onClose={() => setFullscreenUri(null)}
+          onSave={() => handleNativeSave(fullscreenUri)}
+          onShare={() => Share.share({ url: fullscreenUri, message: "Generated with Inkform" })}
+          onCopyPrompt={() => {
+            Clipboard.setStringAsync(state.prompt);
+            showToast("Prompt copied", "success");
+          }}
+          colors={colors}
+        />
+      )}
     </ScreenContainer>
   );
 }
@@ -1190,10 +1363,6 @@ const styles = StyleSheet.create({
     marginRight: 4,
     marginBottom: 4,
   },
-  chipText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
   // Section Card
   sectionCard: {
     borderRadius: 14,
@@ -1287,14 +1456,16 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   // Advanced
-  advancedToggle: {
-    alignItems: "center",
-    paddingVertical: 14,
-    marginTop: 8,
+  actionRow: {
+    flexDirection: "row",
+    marginTop: 20,
   },
-  advancedToggleText: {
-    fontSize: 14,
-    fontWeight: "600",
+  advancedBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
   },
   advLabel: {
     fontSize: 11,
@@ -1381,9 +1552,9 @@ const styles = StyleSheet.create({
   // Generate
   generateBtn: {
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 18,
     alignItems: "center",
-    marginTop: 16,
+    marginTop: 20,
   },
   generateBtnText: {
     color: "#fff",
@@ -1392,7 +1563,7 @@ const styles = StyleSheet.create({
   },
   // Results
   resultsSection: {
-    marginTop: 20,
+    marginTop: 24,
   },
   resultCard: {
     borderRadius: 12,
@@ -1401,8 +1572,8 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   resultImage: {
-    width: SCREEN_W * 0.7,
-    height: SCREEN_W * 0.9,
+    width: SCREEN_W * 0.75,
+    height: SCREEN_W * 0.95,
   },
   saveAllBtn: {
     borderRadius: 16,
@@ -1416,5 +1587,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 6,
+  },
+  // BottomSheet content
+  sheetContent: {
+    padding: 20,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 20,
   },
 });

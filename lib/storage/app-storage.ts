@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
 import { Platform } from "react-native";
 import type {
   GalleryImage,
@@ -9,7 +10,6 @@ import type {
 } from "@/lib/types";
 
 const KEYS = {
-  GALLERY: "inkform_gallery",
   COLLECTIONS: "inkform_collections",
   PROMPT_HISTORY: "inkform_prompt_history",
   BOOKMARKS: "inkform_bookmarks",
@@ -19,19 +19,19 @@ const KEYS = {
 
 const MAX_GALLERY_IMAGES = 500;
 
+/**
+ * Gallery metadata is stored in the filesystem (not AsyncStorage) to bypass
+ * the Android 2MB SQLite limit that causes crashes with large galleries.
+ */
+const GALLERY_FILE =
+  (FileSystem.documentDirectory || "") + "inkform_gallery_metadata.json";
+
 // ===== Image Filesystem Helpers =====
 
-/**
- * Returns the permanent directory for storing Inkform images.
- * Uses documentDirectory which persists across app restarts.
- */
 function getImagesDir(): string {
   return (FileSystem.documentDirectory || "") + "inkform_images/";
 }
 
-/**
- * Ensures the images directory exists.
- */
 async function ensureImagesDirExists(): Promise<void> {
   if (Platform.OS === "web") return;
   const dir = getImagesDir();
@@ -46,7 +46,9 @@ async function ensureImagesDirExists(): Promise<void> {
  * If the URI is already a local file:// path, returns it as-is.
  * Returns the local file:// URI.
  */
-export async function downloadImageToLocal(remoteUri: string): Promise<string> {
+export async function downloadImageToLocal(
+  remoteUri: string
+): Promise<string> {
   if (Platform.OS === "web") return remoteUri;
 
   // Already a local file — nothing to do
@@ -81,26 +83,52 @@ async function deleteLocalImageFile(uri: string): Promise<void> {
   }
 }
 
-// ===== Gallery =====
+// ===== Gallery (filesystem-based metadata) =====
 
 export async function getGalleryImages(): Promise<GalleryImage[]> {
-  const data = await AsyncStorage.getItem(KEYS.GALLERY);
-  return data ? JSON.parse(data) : [];
+  if (Platform.OS === "web") {
+    const data = await AsyncStorage.getItem("inkform_gallery");
+    return data ? JSON.parse(data) : [];
+  }
+  try {
+    const info = await FileSystem.getInfoAsync(GALLERY_FILE);
+    if (!info.exists) return [];
+    const data = await FileSystem.readAsStringAsync(GALLERY_FILE);
+    return JSON.parse(data);
+  } catch (error) {
+    console.error("Failed to read gallery file:", error);
+    return [];
+  }
+}
+
+async function writeGalleryImages(images: GalleryImage[]): Promise<void> {
+  if (Platform.OS === "web") {
+    await AsyncStorage.setItem("inkform_gallery", JSON.stringify(images));
+  } else {
+    await FileSystem.writeAsStringAsync(
+      GALLERY_FILE,
+      JSON.stringify(images)
+    );
+  }
 }
 
 export async function saveGalleryImage(image: GalleryImage): Promise<void> {
   const images = await getGalleryImages();
   images.unshift(image);
 
-  // Enforce 500-image cap — delete oldest images and their files
+  // Enforce 500-image cap — delete oldest non-protected images and their files
   if (images.length > MAX_GALLERY_IMAGES) {
-    const removed = images.splice(MAX_GALLERY_IMAGES);
-    for (const old of removed) {
-      await deleteLocalImageFile(old.uri);
+    let removeCount = images.length - MAX_GALLERY_IMAGES;
+    for (let i = images.length - 1; i >= 0 && removeCount > 0; i--) {
+      if (!images[i].isProtected) {
+        const old = images.splice(i, 1)[0];
+        await deleteLocalImageFile(old.uri);
+        removeCount--;
+      }
     }
   }
 
-  await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(images));
+  await writeGalleryImages(images);
 }
 
 /**
@@ -154,7 +182,7 @@ export async function deleteGalleryImage(id: string): Promise<void> {
     await deleteLocalImageFile(target.uri);
   }
   const filtered = images.filter((img) => img.id !== id);
-  await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(filtered));
+  await writeGalleryImages(filtered);
 }
 
 export async function updateGalleryImage(
@@ -165,7 +193,34 @@ export async function updateGalleryImage(
   const idx = images.findIndex((img) => img.id === id);
   if (idx >= 0) {
     images[idx] = { ...images[idx], ...updates };
-    await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(images));
+    await writeGalleryImages(images);
+  }
+}
+
+// ===== Save to Device Camera Roll =====
+
+/**
+ * Saves a local image file to the device's camera roll / photo library.
+ * Requests permission if not already granted.
+ */
+export async function saveToDeviceGallery(
+  localUri: string
+): Promise<boolean> {
+  if (Platform.OS === "web") return false;
+  try {
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== "granted") throw new Error("Permission denied");
+
+    let formattedUri = localUri;
+    if (!localUri.startsWith("file://") && localUri.startsWith("/")) {
+      formattedUri = `file://${localUri}`;
+    }
+
+    await MediaLibrary.saveToLibraryAsync(formattedUri);
+    return true;
+  } catch (error) {
+    console.error("Camera roll save failed:", error);
+    throw error;
   }
 }
 
@@ -184,20 +239,27 @@ export async function createCollection(name: string): Promise<Collection> {
     createdAt: Date.now(),
   };
   collections.push(newCol);
-  await AsyncStorage.setItem(KEYS.COLLECTIONS, JSON.stringify(collections));
+  await AsyncStorage.setItem(
+    KEYS.COLLECTIONS,
+    JSON.stringify(collections)
+  );
   return newCol;
 }
 
 export async function deleteCollection(id: string): Promise<void> {
   const collections = await getCollections();
   const filtered = collections.filter((c) => c.id !== id);
-  await AsyncStorage.setItem(KEYS.COLLECTIONS, JSON.stringify(filtered));
+  await AsyncStorage.setItem(
+    KEYS.COLLECTIONS,
+    JSON.stringify(filtered)
+  );
+  // Also remove collection references from gallery images
   const images = await getGalleryImages();
   const updated = images.map((img) => ({
     ...img,
     collections: img.collections.filter((cid) => cid !== id),
   }));
-  await AsyncStorage.setItem(KEYS.COLLECTIONS, JSON.stringify(updated));
+  await writeGalleryImages(updated);
 }
 
 export async function addImageToCollection(
@@ -208,7 +270,7 @@ export async function addImageToCollection(
   const idx = images.findIndex((img) => img.id === imageId);
   if (idx >= 0 && !images[idx].collections.includes(collectionId)) {
     images[idx].collections.push(collectionId);
-    await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(images));
+    await writeGalleryImages(images);
   }
 }
 
@@ -222,7 +284,7 @@ export async function removeImageFromCollection(
     images[idx].collections = images[idx].collections.filter(
       (cid) => cid !== collectionId
     );
-    await AsyncStorage.setItem(KEYS.GALLERY, JSON.stringify(images));
+    await writeGalleryImages(images);
   }
 }
 
@@ -255,7 +317,10 @@ export async function addPromptToHistory(
   if (history.length > MAX_HISTORY) {
     history.pop();
   }
-  await AsyncStorage.setItem(KEYS.PROMPT_HISTORY, JSON.stringify(history));
+  await AsyncStorage.setItem(
+    KEYS.PROMPT_HISTORY,
+    JSON.stringify(history)
+  );
 }
 
 export async function savePromptToHistory(params: {
@@ -288,7 +353,10 @@ export async function addBookmark(prompt: SavedPrompt): Promise<void> {
   const exists = bookmarks.some((b) => b.id === prompt.id);
   if (!exists) {
     bookmarks.unshift({ ...prompt, isBookmarked: true });
-    await AsyncStorage.setItem(KEYS.BOOKMARKS, JSON.stringify(bookmarks));
+    await AsyncStorage.setItem(
+      KEYS.BOOKMARKS,
+      JSON.stringify(bookmarks)
+    );
   }
 }
 
@@ -312,7 +380,9 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export async function getSettings(): Promise<AppSettings> {
   const data = await AsyncStorage.getItem(KEYS.SETTINGS);
-  return data ? { ...DEFAULT_SETTINGS, ...JSON.parse(data) } : DEFAULT_SETTINGS;
+  return data
+    ? { ...DEFAULT_SETTINGS, ...JSON.parse(data) }
+    : DEFAULT_SETTINGS;
 }
 
 export async function saveSettings(
@@ -338,8 +408,13 @@ export interface ReuseSettings {
   clipSkip?: number;
 }
 
-export async function saveReuseSettings(settings: ReuseSettings): Promise<void> {
-  await AsyncStorage.setItem(KEYS.REUSE_SETTINGS, JSON.stringify(settings));
+export async function saveReuseSettings(
+  settings: ReuseSettings
+): Promise<void> {
+  await AsyncStorage.setItem(
+    KEYS.REUSE_SETTINGS,
+    JSON.stringify(settings)
+  );
 }
 
 export async function getReuseSettings(): Promise<ReuseSettings | null> {

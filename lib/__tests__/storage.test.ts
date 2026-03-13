@@ -1,18 +1,42 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Define __DEV__ globally for expo-modules-core
+(globalThis as any).__DEV__ = false;
+
+// In-memory filesystem store for gallery metadata
+let fsStore: Record<string, string> = {};
+
 // Mock expo-file-system/legacy
 vi.mock("expo-file-system/legacy", () => ({
   documentDirectory: "file:///data/user/0/com.inkform/files/",
   cacheDirectory: "file:///data/user/0/com.inkform/cache/",
-  getInfoAsync: vi.fn().mockResolvedValue({ exists: false }),
+  getInfoAsync: vi.fn().mockImplementation((path: string) => {
+    return Promise.resolve({ exists: path in fsStore || path.endsWith("inkform_images/") });
+  }),
   makeDirectoryAsync: vi.fn().mockResolvedValue(undefined),
   downloadAsync: vi.fn().mockImplementation((_url: string, dest: string) =>
     Promise.resolve({ uri: dest })
   ),
-  deleteAsync: vi.fn().mockResolvedValue(undefined),
+  deleteAsync: vi.fn().mockImplementation((path: string) => {
+    delete fsStore[path];
+    return Promise.resolve();
+  }),
+  readAsStringAsync: vi.fn().mockImplementation((path: string) => {
+    return Promise.resolve(fsStore[path] || "[]");
+  }),
+  writeAsStringAsync: vi.fn().mockImplementation((path: string, data: string) => {
+    fsStore[path] = data;
+    return Promise.resolve();
+  }),
 }));
 
-// Mock AsyncStorage
+// Mock expo-media-library
+vi.mock("expo-media-library", () => ({
+  requestPermissionsAsync: vi.fn().mockResolvedValue({ status: "granted" }),
+  createAssetAsync: vi.fn().mockResolvedValue({ id: "asset-1" }),
+}));
+
+// Mock AsyncStorage (still used for collections, prompts, etc.)
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: vi.fn().mockResolvedValue(null),
@@ -32,17 +56,14 @@ import {
   getGalleryImages,
   deleteGalleryImage,
 } from "../storage/app-storage";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
+
+const GALLERY_FILE = "file:///data/user/0/com.inkform/files/inkform_gallery_metadata.json";
 
 describe("downloadImageToLocal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (FileSystem.getInfoAsync as any).mockResolvedValue({ exists: false });
-    (FileSystem.makeDirectoryAsync as any).mockResolvedValue(undefined);
-    (FileSystem.downloadAsync as any).mockImplementation((_url: string, dest: string) =>
-      Promise.resolve({ uri: dest })
-    );
+    fsStore = {};
   });
 
   it("returns local file:// URIs unchanged", async () => {
@@ -80,13 +101,7 @@ describe("downloadImageToLocal", () => {
 describe("saveImageToGallery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (AsyncStorage.getItem as any).mockResolvedValue(null);
-    (AsyncStorage.setItem as any).mockResolvedValue(undefined);
-    (FileSystem.getInfoAsync as any).mockResolvedValue({ exists: false });
-    (FileSystem.makeDirectoryAsync as any).mockResolvedValue(undefined);
-    (FileSystem.downloadAsync as any).mockImplementation((_url: string, dest: string) =>
-      Promise.resolve({ uri: dest })
-    );
+    fsStore = {};
   });
 
   it("returns a GalleryImage with a local URI", async () => {
@@ -107,7 +122,7 @@ describe("saveImageToGallery", () => {
     expect(result.createdAt).toBeGreaterThan(0);
   });
 
-  it("persists image to AsyncStorage", async () => {
+  it("persists image to filesystem gallery metadata", async () => {
     await saveImageToGallery({
       uri: "https://example.com/image.jpg",
       prompt: "test prompt",
@@ -116,13 +131,13 @@ describe("saveImageToGallery", () => {
       aspectRatio: "16:9",
     });
 
-    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-      "inkform_gallery",
+    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledWith(
+      GALLERY_FILE,
       expect.stringContaining("test prompt")
     );
   });
 
-  it("stores local URI not remote URL in AsyncStorage", async () => {
+  it("stores local URI not remote URL in gallery metadata", async () => {
     await saveImageToGallery({
       uri: "https://example.com/remote-image.jpg",
       prompt: "test",
@@ -131,7 +146,8 @@ describe("saveImageToGallery", () => {
       aspectRatio: "1:1",
     });
 
-    const storedData = (AsyncStorage.setItem as any).mock.calls[0][1];
+    const storedData = fsStore[GALLERY_FILE];
+    expect(storedData).toBeTruthy();
     const parsed = JSON.parse(storedData);
     expect(parsed[0].uri).toContain("file:///");
     expect(parsed[0].uri).not.toContain("https://");
@@ -149,8 +165,7 @@ describe("saveImageToGallery", () => {
       createdAt: Date.now() - i * 1000,
       collections: [],
     }));
-    (AsyncStorage.getItem as any).mockResolvedValue(JSON.stringify(existingImages));
-    (FileSystem.getInfoAsync as any).mockResolvedValue({ exists: false });
+    fsStore[GALLERY_FILE] = JSON.stringify(existingImages);
 
     await saveImageToGallery({
       uri: "https://example.com/new-image.jpg",
@@ -160,7 +175,7 @@ describe("saveImageToGallery", () => {
       aspectRatio: "1:1",
     });
 
-    const storedData = (AsyncStorage.setItem as any).mock.calls[0][1];
+    const storedData = fsStore[GALLERY_FILE];
     const parsed = JSON.parse(storedData);
     expect(parsed.length).toBe(500);
     // New image should be first
@@ -171,6 +186,7 @@ describe("saveImageToGallery", () => {
 describe("deleteGalleryImage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fsStore = {};
   });
 
   it("removes image from storage and deletes local file", async () => {
@@ -186,8 +202,9 @@ describe("deleteGalleryImage", () => {
         collections: [],
       },
     ];
-    (AsyncStorage.getItem as any).mockResolvedValue(JSON.stringify(existingImages));
-    (FileSystem.getInfoAsync as any).mockResolvedValue({ exists: true });
+    fsStore[GALLERY_FILE] = JSON.stringify(existingImages);
+    // Mark the image file as existing
+    fsStore["file:///data/user/0/com.inkform/files/inkform_images/img1.jpg"] = "binary";
 
     await deleteGalleryImage("img1");
 
@@ -195,7 +212,7 @@ describe("deleteGalleryImage", () => {
       "file:///data/user/0/com.inkform/files/inkform_images/img1.jpg",
       { idempotent: true }
     );
-    const storedData = (AsyncStorage.setItem as any).mock.calls[0][1];
+    const storedData = fsStore[GALLERY_FILE];
     expect(JSON.parse(storedData)).toHaveLength(0);
   });
 });

@@ -365,6 +365,7 @@ export interface GalleryImage {
   createdAt: number;
   collections: string[];
   isUpscaled?: boolean;
+  isProtected?: boolean; // Prevents auto-deletion during 500-image cap
   width?: number;
   height?: number;
   seed?: number;
@@ -389,6 +390,17 @@ export interface SavedPrompt {
   model: string;
   createdAt: number;
   isBookmarked: boolean;
+}
+
+// ===== Style Presets =====
+
+export interface GenerationStylePreset {
+  id: string;
+  name: string;
+  description?: string;
+  modelId: string;
+  config: Partial<Omit<GenerationRequest, 'prompt' | 'negativePrompt' | 'referenceImageUri'>>;
+  negativePromptAppend?: string;
 }
 
 // ===== Generation Types =====

@@ -197,31 +197,69 @@ export async function updateGalleryImage(
   }
 }
 
+/**
+ * Toggle the isProtected (favorite) flag on a gallery image.
+ * Protected images are exempt from the 500-image auto-cleanup cap.
+ */
+export async function toggleProtectedImage(id: string): Promise<boolean> {
+  const images = await getGalleryImages();
+  const idx = images.findIndex((img) => img.id === id);
+  if (idx < 0) return false;
+  const newValue = !images[idx].isProtected;
+  images[idx].isProtected = newValue;
+  await writeGalleryImages(images);
+  return newValue;
+}
+
 // ===== Save to Device Camera Roll =====
 
 /**
- * Saves a local image file to the device's camera roll / photo library.
- * Requests permission if not already granted.
+ * Saves an image to the device's camera roll / photo library.
+ * Handles all URI types: file://, absolute paths, and remote HTTP URLs.
+ * Requests permission first and uses createAssetAsync (most reliable on Android).
  */
 export async function saveToDeviceGallery(
-  localUri: string
+  uri: string
 ): Promise<boolean> {
   if (Platform.OS === "web") return false;
-  try {
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== "granted") throw new Error("Permission denied");
 
-    let formattedUri = localUri;
-    if (!localUri.startsWith("file://") && localUri.startsWith("/")) {
-      formattedUri = `file://${localUri}`;
-    }
-
-    await MediaLibrary.saveToLibraryAsync(formattedUri);
-    return true;
-  } catch (error) {
-    console.error("Camera roll save failed:", error);
-    throw error;
+  // 1. Request permission
+  const { status } = await MediaLibrary.requestPermissionsAsync();
+  if (status !== "granted") {
+    throw new Error(
+      "Photo library permission denied. Please enable it in Settings."
+    );
   }
+
+  // 2. Ensure we have a local file:/// URI (Android requires this)
+  let localUri = uri;
+
+  if (uri.startsWith("http://") || uri.startsWith("https://")) {
+    // Remote URL — download to cache first
+    const ext = uri.includes(".png") ? "png" : "jpg";
+    const filename = `inkform_save_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    const dest = (FileSystem.cacheDirectory || "") + filename;
+    const result = await FileSystem.downloadAsync(uri, dest);
+    localUri = result.uri;
+  } else if (!uri.startsWith("file://") && uri.startsWith("/")) {
+    // Absolute path without file:// prefix
+    localUri = `file://${uri}`;
+  }
+
+  // 3. Verify the file exists before attempting to save
+  try {
+    const info = await FileSystem.getInfoAsync(localUri);
+    if (!info.exists) {
+      throw new Error("Image file not found on device");
+    }
+  } catch (e: any) {
+    // getInfoAsync can throw on some URIs; proceed anyway
+    if (e.message === "Image file not found on device") throw e;
+  }
+
+  // 4. Save using createAssetAsync (most reliable, returns asset, works on Android)
+  await MediaLibrary.createAssetAsync(localUri);
+  return true;
 }
 
 // ===== Collections =====

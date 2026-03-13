@@ -32,7 +32,7 @@ const env = {
   appSlug: "inkform",
   // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
   // Leave empty to use the default icon from assets/images/icon.png
-  logoUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663142327397/GfWdHuTMfyp4rMserHNFda/inkform-icon-3XBDaWQBkL5K48Ck6DPHfS.png",
+  logoUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663142327397/GfWdHuTMfyp4rMserHNFda/inkform-icon-QvisLYyApbjakKcPNHsNsS.png",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
@@ -56,7 +56,7 @@ const config: ExpoConfig = {
   },
   android: {
     adaptiveIcon: {
-      backgroundColor: "#4F46E5",
+      backgroundColor: "#1E3A5F",
       foregroundImage: "./assets/images/android-icon-foreground.png",
       backgroundImage: "./assets/images/android-icon-background.png",
       monochromeImage: "./assets/images/android-icon-monochrome.png",
@@ -64,7 +64,12 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS"],
+    permissions: [
+      "POST_NOTIFICATIONS",
+      "READ_MEDIA_IMAGES",
+      "READ_EXTERNAL_STORAGE",
+      "WRITE_EXTERNAL_STORAGE",
+    ],
     intentFilters: [
       {
         action: "VIEW",
@@ -105,9 +110,9 @@ const config: ExpoConfig = {
         image: "./assets/images/splash-icon.png",
         imageWidth: 200,
         resizeMode: "contain",
-        backgroundColor: "#0D0D12",
+        backgroundColor: "#F8FAFC",
         dark: {
-          backgroundColor: "#0D0D12",
+          backgroundColor: "#111827",
         },
       },
     ],

@@ -18,11 +18,14 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  runOnJS,
 } from "react-native-reanimated";
 import type { GalleryImage } from "@/lib/types";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } =
   Dimensions.get("window");
+
+const SWIPE_THRESHOLD = 80;
 
 interface FullscreenViewerProps {
   image: Partial<GalleryImage>;
@@ -34,6 +37,12 @@ interface FullscreenViewerProps {
     primary: string;
     [key: string]: string;
   };
+  /** For swipe navigation */
+  onPrev?: () => void;
+  onNext?: () => void;
+  /** Current index / total for indicator */
+  currentIndex?: number;
+  totalCount?: number;
 }
 
 export function FullscreenViewer({
@@ -43,6 +52,10 @@ export function FullscreenViewer({
   onShare,
   onCopyPrompt,
   colors,
+  onPrev,
+  onNext,
+  currentIndex,
+  totalCount,
 }: FullscreenViewerProps) {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -83,6 +96,7 @@ export function FullscreenViewer({
     })
     .onUpdate((e) => {
       if (scale.value > 1.05) {
+        // Zoomed in: allow panning
         const maxX = (SCREEN_WIDTH * (scale.value - 1)) / 2;
         const maxY = (SCREEN_HEIGHT * (scale.value - 1)) / 2;
         translateX.value = Math.max(
@@ -93,11 +107,28 @@ export function FullscreenViewer({
           -maxY,
           Math.min(maxY, savedTranslateY.value + e.translationY)
         );
+      } else {
+        // Not zoomed: allow horizontal swipe for navigation
+        translateX.value = e.translationX;
       }
     })
-    .onEnd(() => {
-      savedTranslateX.value = translateX.value;
-      savedTranslateY.value = translateY.value;
+    .onEnd((e) => {
+      if (scale.value <= 1.05) {
+        // Check for swipe navigation
+        if (e.translationX > SWIPE_THRESHOLD && onPrev) {
+          runOnJS(onPrev)();
+        } else if (e.translationX < -SWIPE_THRESHOLD && onNext) {
+          runOnJS(onNext)();
+        }
+        // Snap back
+        translateX.value = withTiming(0, { duration: 200 });
+        translateY.value = withTiming(0, { duration: 200 });
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        savedTranslateX.value = translateX.value;
+        savedTranslateY.value = translateY.value;
+      }
     });
 
   const doubleTapGesture = Gesture.Tap()
@@ -130,6 +161,10 @@ export function FullscreenViewer({
       { scale: scale.value },
     ],
   }));
+
+  const hasNav = onPrev || onNext;
+  const showIndicator =
+    hasNav && currentIndex !== undefined && totalCount !== undefined;
 
   return (
     <Modal visible animationType="fade" transparent statusBarTranslucent>
@@ -184,8 +219,35 @@ export function FullscreenViewer({
             </Animated.View>
           </GestureDetector>
 
+          {/* Navigation arrows (visible when not zoomed) */}
+          {hasNav && (
+            <>
+              {onPrev && (
+                <TouchableOpacity
+                  onPress={onPrev}
+                  style={[viewerStyles.navArrow, viewerStyles.navArrowLeft]}
+                >
+                  <Text style={viewerStyles.navArrowText}>‹</Text>
+                </TouchableOpacity>
+              )}
+              {onNext && (
+                <TouchableOpacity
+                  onPress={onNext}
+                  style={[viewerStyles.navArrow, viewerStyles.navArrowRight]}
+                >
+                  <Text style={viewerStyles.navArrowText}>›</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
           {/* Bottom bar */}
           <View style={viewerStyles.bottomBar}>
+            {showIndicator && (
+              <Text style={viewerStyles.indexIndicator}>
+                {(currentIndex ?? 0) + 1} / {totalCount}
+              </Text>
+            )}
             <Text
               style={viewerStyles.bottomModel}
               numberOfLines={1}
@@ -193,7 +255,9 @@ export function FullscreenViewer({
               {image.model} · {image.provider}
             </Text>
             <Text style={viewerStyles.hint}>
-              Pinch to zoom · Double-tap to zoom in/out
+              {hasNav
+                ? "Swipe to navigate · Pinch to zoom · Double-tap to zoom"
+                : "Pinch to zoom · Double-tap to zoom in/out"}
             </Text>
           </View>
         </View>
@@ -257,6 +321,30 @@ const viewerStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  navArrow: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -24,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 5,
+  },
+  navArrowLeft: {
+    left: 8,
+  },
+  navArrowRight: {
+    right: 8,
+  },
+  navArrowText: {
+    color: "#fff",
+    fontSize: 28,
+    fontWeight: "300",
+    lineHeight: 32,
+  },
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -267,6 +355,12 @@ const viewerStyles = StyleSheet.create({
     paddingTop: 12,
     backgroundColor: "rgba(0,0,0,0.5)",
     alignItems: "center",
+  },
+  indexIndicator: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 4,
   },
   bottomModel: {
     color: "rgba(255,255,255,0.7)",

@@ -107,7 +107,7 @@ function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
       </Animated.View>
       <ActivityIndicator
         size="small"
-        color="rgba(167,139,250,0.5)"
+        color="rgba(96,165,250,0.5)"
         style={splashStyles.loader}
       />
     </Animated.View>
@@ -117,7 +117,7 @@ function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
 const splashStyles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#0D0D14",
+    backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 999,
@@ -126,12 +126,12 @@ const splashStyles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 28,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#1E3A5F",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "rgba(167,139,250,0.3)",
-    shadowColor: "#A78BFA",
+    borderColor: "rgba(96,165,250,0.35)",
+    shadowColor: "#60A5FA",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 20,
@@ -139,7 +139,7 @@ const splashStyles = StyleSheet.create({
   },
   logoEmoji: {
     fontSize: 48,
-    color: "#A78BFA",
+    color: "#60A5FA",
   },
   title: {
     fontSize: 36,
@@ -152,7 +152,7 @@ const splashStyles = StyleSheet.create({
   subtitle: {
     fontSize: 15,
     fontWeight: "500",
-    color: "rgba(167,139,250,0.7)",
+    color: "rgba(96,165,250,0.7)",
     textAlign: "center",
     marginTop: 6,
     letterSpacing: 2,
@@ -245,7 +245,7 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="oauth/callback" />
             </Stack>
-            <StatusBar style="light" />
+            <StatusBar style="auto" />
           </ToastProvider>
         </QueryClientProvider>
       </trpc.Provider>

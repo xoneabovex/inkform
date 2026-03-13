@@ -36,7 +36,6 @@ import {
   type VaeId,
   type GenerationRequest,
   type CivitaiModelPreview,
-  type GenerationStylePreset,
 } from "@/lib/types";
 import { generateImages } from "@/lib/api/generate";
 import { parseCivitaiId, fetchCivitaiModelVersion } from "@/lib/api/civitai";
@@ -59,57 +58,6 @@ const NEG_PRESETS = [
   { label: "Pony/Illustrious", text: "score_4, score_3, score_2, score_1, worst quality, low quality, lowres, bad anatomy, bad hands, extra digits, fewer digits, text, watermark, signature" },
   { label: "No Watermarks", text: "watermark, text, signature, logo, banner, username, copyright, artist name, url, website" },
   { label: "Face Fix", text: "deformed face, ugly face, asymmetrical eyes, cross-eyed, bad eyes, deformed iris, bad teeth, extra teeth, missing teeth" },
-];
-
-// ===== Style Presets =====
-const STYLE_PRESETS: GenerationStylePreset[] = [
-  {
-    id: "anime-studio",
-    name: "Anime Studio",
-    description: "Optimized for anime/manga with Pony Diffusion",
-    modelId: "rp-pony",
-    config: {
-      steps: 35,
-      cfg: 6.5,
-      samplingMethod: "euler_a" as SamplingMethodId,
-      vae: "auto" as VaeId,
-      aspectRatio: ASPECT_RATIOS[0],
-    },
-    negativePromptAppend: "EasyNegative, extra fingers, poor shading",
-  },
-  {
-    id: "storyboard-photo",
-    name: "Storyboard Photo",
-    description: "Photorealistic with SD 1.x",
-    modelId: "rp-sd15",
-    config: {
-      steps: 25,
-      cfg: 8,
-      samplingMethod: "dpm++_2m_karras" as SamplingMethodId,
-      vae: "auto" as VaeId,
-      aspectRatio: ASPECT_RATIOS[2],
-    },
-    negativePromptAppend: "cartoon, graphic, illustration, low quality, sketch",
-  },
-  {
-    id: "flux-fast",
-    name: "Flux Fast",
-    description: "Quick generation with Flux Schnell",
-    modelId: "flux-1-schnell",
-    config: {
-      aspectRatio: ASPECT_RATIOS[0],
-    },
-  },
-  {
-    id: "cinematic-wide",
-    name: "Cinematic Wide",
-    description: "16:9 cinematic with Flux.2 Pro",
-    modelId: "flux-2-pro",
-    config: {
-      steps: 25,
-      aspectRatio: ASPECT_RATIOS.find((a) => a.value === "16:9") || ASPECT_RATIOS[0],
-    },
-  },
 ];
 
 // ===== Reducer State =====
@@ -203,9 +151,6 @@ export default function StudioScreen() {
   const updateField = (field: keyof GenState, value: any) =>
     dispatch({ type: "SET_FIELD", field, value });
 
-  // Style presets
-  const [activePresetId, setActivePresetId] = useState<string | null>(null);
-
   // Model picker
   const [expandedEcosystem, setExpandedEcosystem] = useState<string | null>(null);
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -231,6 +176,7 @@ export default function StudioScreen() {
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState("");
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
 
   // Fullscreen viewer
   const [fullscreenUri, setFullscreenUri] = useState<string | null>(null);
@@ -356,6 +302,7 @@ export default function StudioScreen() {
     setGenerating(true);
     setGenStatus("Preparing...");
     setGeneratedImages([]);
+    setBatchProgress({ done: 0, total: 0 });
 
     try {
       const effectiveSeed = state.randomSeed ? -1 : state.seed;
@@ -405,9 +352,11 @@ export default function StudioScreen() {
       });
 
       const localUris: string[] = [];
-      for (const uri of images) {
+      setBatchProgress({ done: 0, total: images.length });
+      setGenStatus("Saving...");
+      for (let i = 0; i < images.length; i++) {
         const saved = await saveImageToGallery({
-          uri,
+          uri: images[i],
           prompt: state.prompt.trim(),
           negativePrompt: state.negativePrompt.trim() || undefined,
           provider: state.model.provider,
@@ -419,6 +368,7 @@ export default function StudioScreen() {
           steps: state.model.supportsSteps ? state.steps : undefined,
         });
         localUris.push(saved.uri);
+        setBatchProgress({ done: i + 1, total: images.length });
       }
 
       setGeneratedImages(localUris);
@@ -429,6 +379,7 @@ export default function StudioScreen() {
     } finally {
       setGenerating(false);
       setGenStatus("");
+      setBatchProgress({ done: 0, total: 0 });
     }
   };
 
@@ -457,33 +408,6 @@ export default function StudioScreen() {
     } catch (e: any) {
       showToast("Failed to save: " + (e.message || "unknown"), "error");
     }
-  };
-
-  // ===== Apply Style Preset =====
-  const handleApplyPreset = (preset: GenerationStylePreset) => {
-    setActivePresetId(preset.id);
-    const targetModel = getModelById(preset.modelId);
-    if (targetModel) {
-      dispatch({ type: "SET_MODEL", model: targetModel });
-    }
-    // Apply config overrides
-    const payload: Partial<GenState> = {};
-    if (preset.config.steps !== undefined) payload.steps = preset.config.steps;
-    if (preset.config.cfg !== undefined) payload.cfg = preset.config.cfg;
-    if (preset.config.samplingMethod) payload.samplingMethod = preset.config.samplingMethod as SamplingMethodId;
-    if (preset.config.vae) payload.vae = preset.config.vae as VaeId;
-    if (preset.config.aspectRatio) payload.aspectRatio = preset.config.aspectRatio;
-    dispatch({ type: "LOAD_PRESET", payload });
-    // Append negative prompt if specified
-    if (preset.negativePromptAppend) {
-      updateField(
-        "negativePrompt",
-        state.negativePrompt
-          ? state.negativePrompt + ", " + preset.negativePromptAppend
-          : preset.negativePromptAppend
-      );
-    }
-    showToast(`${preset.name} applied ✓`, "success");
   };
 
   // ===== Helpers =====
@@ -539,7 +463,6 @@ export default function StudioScreen() {
                           dispatch({ type: "SET_MODEL", model });
                           setShowModelPicker(false);
                           setExpandedEcosystem(null);
-                          setActivePresetId(null);
                         }}
                         style={[
                           styles.accordionItem,
@@ -627,7 +550,7 @@ export default function StudioScreen() {
           {ASPECT_RATIOS.map((ar) => (
             <TouchableOpacity
               key={ar.value}
-              onPress={() => { updateField("aspectRatio", ar); setActivePresetId(null); }}
+              onPress={() => updateField("aspectRatio", ar)}
               style={[
                 styles.chip,
                 { borderColor: colors.border },
@@ -664,39 +587,6 @@ export default function StudioScreen() {
             );
           })}
         </View>
-
-        {/* ===== Style Presets ===== */}
-        <Text style={[styles.label, { color: colors.muted, marginTop: 24 }]}>STYLE PRESETS</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-          <TouchableOpacity
-            onPress={() => {
-              dispatch({ type: "LOAD_PRESET", payload: initialState });
-              setActivePresetId(null);
-            }}
-            style={[
-              styles.chip,
-              { borderColor: colors.border },
-              !activePresetId && { backgroundColor: colors.surface },
-            ]}
-          >
-            <Text style={{ color: !activePresetId ? colors.foreground : colors.muted, fontWeight: "500" }}>Default</Text>
-          </TouchableOpacity>
-          {STYLE_PRESETS.map((preset) => (
-            <TouchableOpacity
-              key={preset.id}
-              onPress={() => handleApplyPreset(preset)}
-              style={[
-                styles.chip,
-                { borderColor: colors.border },
-                activePresetId === preset.id && { backgroundColor: colors.primary, borderColor: colors.primary },
-              ]}
-            >
-              <Text style={{ color: activePresetId === preset.id ? "#fff" : colors.foreground, fontWeight: "600" }}>
-                {preset.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
 
         {/* ===== Legacy Civitai Loader ===== */}
         {isLegacyCivitai && (
@@ -863,6 +753,26 @@ export default function StudioScreen() {
             <Text style={styles.generateBtnText}>Generate</Text>
           )}
         </TouchableOpacity>
+
+        {/* ===== Progress Bar ===== */}
+        {generating && batchProgress.total > 0 && (
+          <View style={styles.progressContainer}>
+            <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    backgroundColor: colors.primary,
+                    width: `${Math.round((batchProgress.done / batchProgress.total) * 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[styles.progressText, { color: colors.muted }]}>
+              {batchProgress.done}/{batchProgress.total} saved
+            </Text>
+          </View>
+        )}
 
         {/* ===== Generated Images ===== */}
         {generatedImages.length > 0 && (
@@ -1596,5 +1506,24 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "700",
     marginBottom: 20,
+  },
+  progressContainer: {
+    marginTop: 8,
+    alignItems: "center",
+    gap: 6,
+  },
+  progressTrack: {
+    width: "100%",
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: "500",
   },
 });

@@ -78,3 +78,13 @@
 - [x] Refactor: Create shared FullscreenViewer component (extract from gallery)
 - [x] Refactor: Studio screen — useReducer for generation state, Style Presets, BottomSheet for advanced settings
 - [x] Refactor: Gallery — use shared FullscreenViewer and saveToDeviceGallery
+- [x] CRITICAL: Fix save-to-device — rewritten saveToDeviceGallery with createAssetAsync, file:/// enforcement, HTTP download fallback, file existence check, Android media permissions added
+- [x] Add generation progress bar — shows batch save progress (X/Y saved) with animated bar
+- [x] Add swipe left/right navigation in FullscreenViewer with arrow buttons and index indicator
+- [x] Add Favorites/protected filter — heart badge on grid, toggle in detail modal, ♥ Favorites filter pill
+- [x] Remove style presets from Studio screen (kept negative prompt presets)
+- [x] Add dark/light/system theme toggle in Settings screen
+- [x] Improve dark theme — grey+blue palette (#111827 bg, #1F2937 surface, #60A5FA primary)
+- [x] Add light theme with proper colors (#F8FAFC bg, #FFFFFF surface, #2563EB primary)
+- [x] Generate new app icon matching Cinematic Blue theme (pen nib dissolving into pixels)
+- [x] Generate new splash screen with icon matching app theme (icon reused as splash-icon)

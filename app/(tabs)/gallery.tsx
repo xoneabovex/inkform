@@ -31,6 +31,7 @@ import {
   addImageToCollection,
   saveReuseSettings,
   saveToDeviceGallery,
+  toggleProtectedImage,
 } from "@/lib/storage/app-storage";
 import type { GalleryImage, Collection } from "@/lib/types";
 
@@ -48,9 +49,11 @@ export default function GalleryScreen() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<GalleryImage | null>(null);
+  const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showCollectionModal, setShowCollectionModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -73,9 +76,11 @@ export default function GalleryScreen() {
     }
   };
 
-  const filteredImages = selectedCollection
-    ? images.filter((img) => img.collections.includes(selectedCollection))
-    : images;
+  const filteredImages = images.filter((img) => {
+    if (selectedCollection && !img.collections.includes(selectedCollection)) return false;
+    if (showFavoritesOnly && !img.isProtected) return false;
+    return true;
+  });
 
   const handleDelete = async (id: string) => {
     try {
@@ -152,7 +157,41 @@ export default function GalleryScreen() {
   };
 
   const openFullscreen = (image: GalleryImage) => {
+    const idx = filteredImages.findIndex((img) => img.id === image.id);
+    setFullscreenIndex(idx >= 0 ? idx : 0);
     setFullscreenImage(image);
+  };
+
+  const handleToggleFavorite = async (id: string) => {
+    try {
+      const newVal = await toggleProtectedImage(id);
+      setImages((prev) =>
+        prev.map((img) => (img.id === id ? { ...img, isProtected: newVal } : img))
+      );
+      // Also update selectedImage if it's the same
+      if (selectedImage?.id === id) {
+        setSelectedImage((prev) => prev ? { ...prev, isProtected: newVal } : prev);
+      }
+      showToast(newVal ? "Added to favorites" : "Removed from favorites", "success");
+    } catch {
+      showToast("Failed to update favorite", "error");
+    }
+  };
+
+  const handleFullscreenPrev = () => {
+    if (fullscreenIndex > 0) {
+      const newIdx = fullscreenIndex - 1;
+      setFullscreenIndex(newIdx);
+      setFullscreenImage(filteredImages[newIdx]);
+    }
+  };
+
+  const handleFullscreenNext = () => {
+    if (fullscreenIndex < filteredImages.length - 1) {
+      const newIdx = fullscreenIndex + 1;
+      setFullscreenIndex(newIdx);
+      setFullscreenImage(filteredImages[newIdx]);
+    }
   };
 
   const handleReuseSettings = async (image: GalleryImage) => {
@@ -191,6 +230,11 @@ export default function GalleryScreen() {
         contentFit="cover"
         transition={200}
       />
+      {item.isProtected && (
+        <View style={styles.favBadge}>
+          <Text style={styles.favBadgeText}>♥</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 
@@ -219,17 +263,31 @@ export default function GalleryScreen() {
         contentContainerStyle={styles.collectionScrollContent}
       >
         <TouchableOpacity
-          onPress={() => setSelectedCollection(null)}
+          onPress={() => { setSelectedCollection(null); setShowFavoritesOnly(false); }}
           style={[
             styles.collectionPill,
             {
-              backgroundColor: !selectedCollection ? colors.primary : colors.surface,
-              borderColor: !selectedCollection ? colors.primary : colors.border,
+              backgroundColor: !selectedCollection && !showFavoritesOnly ? colors.primary : colors.surface,
+              borderColor: !selectedCollection && !showFavoritesOnly ? colors.primary : colors.border,
             },
           ]}
         >
-          <Text style={{ color: !selectedCollection ? "#fff" : colors.foreground, fontSize: 13, fontWeight: "600" }}>
+          <Text style={{ color: !selectedCollection && !showFavoritesOnly ? "#fff" : colors.foreground, fontSize: 13, fontWeight: "600" }}>
             All
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => { setShowFavoritesOnly(!showFavoritesOnly); setSelectedCollection(null); }}
+          style={[
+            styles.collectionPill,
+            {
+              backgroundColor: showFavoritesOnly ? colors.primary : colors.surface,
+              borderColor: showFavoritesOnly ? colors.primary : colors.border,
+            },
+          ]}
+        >
+          <Text style={{ color: showFavoritesOnly ? "#fff" : colors.foreground, fontSize: 13, fontWeight: "600" }}>
+            ♥ Favorites
           </Text>
         </TouchableOpacity>
         {collections.map((col) => (
@@ -292,6 +350,10 @@ export default function GalleryScreen() {
           onShare={() => handleShare(fullscreenImage.uri)}
           onCopyPrompt={() => handleCopyPrompt(fullscreenImage.prompt)}
           colors={colors}
+          onPrev={fullscreenIndex > 0 ? handleFullscreenPrev : undefined}
+          onNext={fullscreenIndex < filteredImages.length - 1 ? handleFullscreenNext : undefined}
+          currentIndex={fullscreenIndex}
+          totalCount={filteredImages.length}
         />
       )}
 
@@ -313,6 +375,14 @@ export default function GalleryScreen() {
                     style={[styles.detailActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
                   >
                     <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>⛶ Expand</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleToggleFavorite(selectedImage.id)}
+                    style={[styles.detailActionBtn, { backgroundColor: selectedImage.isProtected ? colors.error : colors.surface, borderColor: selectedImage.isProtected ? colors.error : colors.border }]}
+                  >
+                    <Text style={{ color: selectedImage.isProtected ? "#fff" : colors.foreground, fontSize: 13, fontWeight: "600" }}>
+                      {selectedImage.isProtected ? "♥ Fav" : "♡ Fav"}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => handleSaveToGallery(selectedImage.uri)}
@@ -703,5 +773,21 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
+  },
+  favBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  favBadgeText: {
+    color: "#EF4444",
+    fontSize: 12,
+    lineHeight: 14,
   },
 });

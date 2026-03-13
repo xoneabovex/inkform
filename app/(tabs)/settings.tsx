@@ -11,6 +11,7 @@ import {
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
+import { useThemeContext, type ThemeMode } from "@/lib/theme-provider";
 import {
   saveApiKey,
   getAllApiKeys,
@@ -95,9 +96,16 @@ function PlainInput({
   );
 }
 
+const THEME_OPTIONS: { mode: ThemeMode; label: string; icon: string }[] = [
+  { mode: "light", label: "Light", icon: "☀️" },
+  { mode: "dark", label: "Dark", icon: "🌙" },
+  { mode: "system", label: "System", icon: "⚙️" },
+];
+
 export default function SettingsScreen() {
   const colors = useColors();
   const { showToast } = useToast();
+  const { themeMode, setThemeMode } = useThemeContext();
 
   const [keys, setKeys] = useState<ApiKeys>({});
   const [loading, setLoading] = useState(true);
@@ -157,6 +165,47 @@ export default function SettingsScreen() {
       >
         <Text style={[styles.screenTitle, { color: colors.foreground }]}>Settings</Text>
         <Text style={[styles.screenSubtitle, { color: colors.muted }]}>
+          Appearance and API configuration.
+        </Text>
+
+        {/* Appearance / Theme */}
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Appearance</Text>
+          <Text style={[styles.sectionDesc, { color: colors.muted }]}>
+            Choose your preferred color theme.
+          </Text>
+          <View style={styles.themeRow}>
+            {THEME_OPTIONS.map((opt) => {
+              const isActive = themeMode === opt.mode;
+              return (
+                <TouchableOpacity
+                  key={opt.mode}
+                  onPress={() => setThemeMode(opt.mode)}
+                  style={[
+                    styles.themeOption,
+                    {
+                      backgroundColor: isActive ? colors.primary : colors.background,
+                      borderColor: isActive ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={styles.themeIcon}>{opt.icon}</Text>
+                  <Text
+                    style={[
+                      styles.themeLabel,
+                      { color: isActive ? "#fff" : colors.foreground },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* API Keys Header */}
+        <Text style={[styles.apiKeysHeader, { color: colors.muted }]}>
           API keys are stored securely on your device.
         </Text>
 
@@ -259,6 +308,13 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     lineHeight: 20,
   },
+  apiKeysHeader: {
+    fontSize: 12,
+    fontWeight: "500",
+    letterSpacing: 0.5,
+    marginBottom: 12,
+    marginTop: 4,
+  },
   section: {
     borderRadius: 14,
     padding: 16,
@@ -274,6 +330,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 14,
+  },
+  themeRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  themeOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  themeIcon: {
+    fontSize: 16,
+  },
+  themeLabel: {
+    fontSize: 14,
+    fontWeight: "600",
   },
   inputGroup: {
     marginBottom: 14,

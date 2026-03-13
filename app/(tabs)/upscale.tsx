@@ -15,7 +15,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useToast } from "@/lib/toast-context";
 import { useFocusEffect } from "@react-navigation/native";
-import { getGalleryImages, saveGalleryImage } from "@/lib/storage/app-storage";
+import { getGalleryImages, saveGalleryImage, saveToDeviceGallery } from "@/lib/storage/app-storage";
 import { getApiKey } from "@/lib/storage/secure-store";
 import { upscaleWithReplicate } from "@/lib/api/replicate";
 import type { GalleryImage, UpscaleModel } from "@/lib/types";
@@ -112,7 +112,6 @@ export default function UpscaleScreen() {
     if (!resultImage) return;
 
     if (Platform.OS === "web") {
-      // Web: open in new tab for download
       try {
         const link = document.createElement("a");
         link.href = resultImage;
@@ -127,27 +126,10 @@ export default function UpscaleScreen() {
     }
 
     try {
-      const MediaLibrary = await import("expo-media-library");
-      const FileSystem = await import("expo-file-system/legacy");
-
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        showToast("Permission denied to save to camera roll", "error");
-        return;
-      }
-
-      let localUri = resultImage;
-      // If still a remote URL (fallback case), download it first
-      if (resultImage.startsWith("http")) {
-        const fileUri = (FileSystem.documentDirectory || "") + `inkform-upscaled-${Date.now()}.png`;
-        await FileSystem.downloadAsync(resultImage, fileUri);
-        localUri = fileUri;
-      }
-
-      await MediaLibrary.createAssetAsync(localUri);
+      await saveToDeviceGallery(resultImage);
       showToast("Saved to Camera Roll ✓", "success");
     } catch (error: any) {
-      showToast("Failed to save: " + error.message, "error");
+      showToast("Failed to save: " + (error.message || "unknown error"), "error");
     }
   };
 

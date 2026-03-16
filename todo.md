@@ -88,3 +88,4 @@
 - [x] Add light theme with proper colors (#F8FAFC bg, #FFFFFF surface, #2563EB primary)
 - [x] Generate new app icon matching Cinematic Blue theme (pen nib dissolving into pixels)
 - [x] Generate new splash screen with icon matching app theme (icon reused as splash-icon)
+- [x] Fix file extension detection in saveToDeviceGallery (replaced .includes(".png") with getFileExtension helper — handles query params, fragments, and all image formats)

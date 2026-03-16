@@ -32,6 +32,16 @@ function getImagesDir(): string {
   return (FileSystem.documentDirectory || "") + "inkform_images/";
 }
 
+/**
+ * Extracts file extension from a URI, handling query parameters and fragments.
+ * Falls back to "jpg" if no extension is found.
+ */
+function getFileExtension(uri: string): string {
+  const cleanPath = uri.split("?")[0].split("#")[0];
+  const match = cleanPath.match(/\.(\w+)$/);
+  return match ? match[1].toLowerCase() : "jpg";
+}
+
 async function ensureImagesDirExists(): Promise<void> {
   if (Platform.OS === "web") return;
   const dir = getImagesDir();
@@ -58,7 +68,7 @@ export async function downloadImageToLocal(
 
   await ensureImagesDirExists();
 
-  const ext = remoteUri.includes(".png") ? "png" : "jpg";
+  const ext = getFileExtension(remoteUri);
   const filename = `inkform_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const destUri = getImagesDir() + filename;
 
@@ -236,7 +246,7 @@ export async function saveToDeviceGallery(
 
   if (uri.startsWith("http://") || uri.startsWith("https://")) {
     // Remote URL — download to cache first
-    const ext = uri.includes(".png") ? "png" : "jpg";
+    const ext = getFileExtension(uri);
     const filename = `inkform_save_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
     const dest = (FileSystem.cacheDirectory || "") + filename;
     const result = await FileSystem.downloadAsync(uri, dest);

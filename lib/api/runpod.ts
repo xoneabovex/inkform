@@ -70,6 +70,9 @@ export async function generateWithRunPod(
   if (req.denoisingStrength !== undefined) {
     input.denoising_strength = req.denoisingStrength;
   }
+  if (req.referenceImageUri) {
+    input.init_image_url = req.referenceImageUri;
+  }
 
   onProgress?.("Submitting to RunPod...");
 

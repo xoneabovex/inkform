@@ -37,6 +37,7 @@ const API_KEY_KEYS = {
   civitaiApiToken: "civitai_api_token",
   replicateApiToken: "replicate_api_token",
   googleApiKey: "google_api_key",
+  openaiApiKey: "openai_api_key",
 } as const;
 
 export async function saveApiKey(

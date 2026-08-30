@@ -10,6 +10,7 @@ let fsStore: Record<string, string> = {};
 vi.mock("expo-file-system/legacy", () => ({
   documentDirectory: "file:///data/user/0/com.inkform/files/",
   cacheDirectory: "file:///data/user/0/com.inkform/cache/",
+  EncodingType: { Base64: "base64" },
   getInfoAsync: vi.fn().mockImplementation((path: string) => {
     return Promise.resolve({ exists: path in fsStore || path.endsWith("inkform_images/") });
   }),
@@ -17,6 +18,7 @@ vi.mock("expo-file-system/legacy", () => ({
   downloadAsync: vi.fn().mockImplementation((_url: string, dest: string) =>
     Promise.resolve({ uri: dest })
   ),
+  copyAsync: vi.fn().mockResolvedValue(undefined),
   deleteAsync: vi.fn().mockImplementation((path: string) => {
     delete fsStore[path];
     return Promise.resolve();
@@ -95,6 +97,17 @@ describe("downloadImageToLocal", () => {
     await downloadImageToLocal(remoteUrl);
     const dest = (FileSystem.downloadAsync as any).mock.calls[0][1];
     expect(dest).toMatch(/\.jpg$/);
+  });
+
+  it("writes provider base64 responses to a permanent image file", async () => {
+    const result = await downloadImageToLocal("data:image/png;base64,aW5rZm9ybQ==");
+
+    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/inkform_images\/.+\.png$/),
+      "aW5rZm9ybQ==",
+      { encoding: "base64" }
+    );
+    expect(result).toContain("file:///");
   });
 });
 

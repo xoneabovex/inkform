@@ -33,7 +33,7 @@ Input Schema:
     "vae": str (optional — "default", "sdxl-vae-fp16-fix", "kl-f8-anime2"),
     "mature_content": bool (optional, default false),
     "denoising_strength": float (optional, for img2img),
-    "init_image_url": str (optional, URL for img2img reference image)
+    "init_image_url": str (optional, HTTP URL or base64 data URI for img2img)
   }
 
 Output Schema:
@@ -43,6 +43,7 @@ Output Schema:
 import os
 import io
 import base64
+import binascii
 import random
 import requests
 import torch
@@ -178,7 +179,20 @@ def download_civitai_file(version_id: str, token: str, is_lora: bool = False) ->
 
 # ===== Image Helpers =====
 def download_image(url: str) -> Image.Image:
-    """Download an image from URL for img2img."""
+    """Load an HTTP(S) URL or a base64 data URI for img2img."""
+    if url.startswith("data:image/"):
+        try:
+            header, encoded = url.split(",", 1)
+            if ";base64" not in header:
+                raise ValueError("Reference image data URI is not base64 encoded")
+            image_bytes = base64.b64decode(encoded, validate=True)
+            return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise ValueError("Invalid reference image data URI") from exc
+
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("Reference image must be an HTTP URL or base64 data URI")
+
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
     return Image.open(io.BytesIO(resp.content)).convert("RGB")

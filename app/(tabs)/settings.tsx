@@ -17,6 +17,7 @@ import {
   getAllApiKeys,
 } from "@/lib/storage/secure-store";
 import type { ApiKeys } from "@/lib/types";
+import { checkApiConnections, type ConnectionResult } from "@/lib/api/connection-check";
 
 function SecureInput({
   label,
@@ -110,6 +111,17 @@ export default function SettingsScreen() {
   const [keys, setKeys] = useState<ApiKeys>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [connectionResults, setConnectionResults] = useState<ConnectionResult[]>([]);
+
+  useEffect(() => { setConnectionResults([]); }, [keys]);
+
+  const handleCheck = async () => {
+    setChecking(true);
+    try {
+      setConnectionResults(await checkApiConnections(keys));
+    } finally { setChecking(false); }
+  };
 
   useEffect(() => {
     loadData();
@@ -231,7 +243,7 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>OpenAI</Text>
           <Text style={[styles.sectionDesc, { color: colors.muted }]}>
-            Required only for GPT Image 1. Replicate hosts the model wrapper, but the model also requires your OpenAI API key.
+            Optional for GPT Image 2.5. Leave blank to use Replicate billing, or supply your own OpenAI key.
           </Text>
           <SecureInput
             label="API KEY"
@@ -247,7 +259,7 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Google (Gemini API)</Text>
           <Text style={[styles.sectionDesc, { color: colors.muted }]}>
-            Used for Imagen 3 and Imagen 4 image generation.
+            Used for Nano Banana, Nano Banana 2, Nano Banana Pro, and Nano Banana 2 Lite. Retired Imagen selections migrate automatically.
           </Text>
           <SecureInput
             label="API KEY"
@@ -292,6 +304,22 @@ export default function SettingsScreen() {
         </View>
 
         {/* Save Button */}
+        <TouchableOpacity
+          onPress={handleCheck}
+          disabled={checking}
+          style={[styles.saveButton, { backgroundColor: colors.primary, opacity: checking ? 0.6 : 1 }]}
+        >
+          {checking ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Test API Connections</Text>}
+        </TouchableOpacity>
+        <Text style={[styles.sectionDesc, { color: colors.muted, marginTop: 8 }]}>
+          Tests the entered keys without generating images or spending credits. Save Settings to keep changes.
+        </Text>
+        {connectionResults.map((result) => (
+          <View key={result.provider} style={styles.inputGroup}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>{result.provider}: {result.status}</Text>
+            <Text style={[styles.sectionDesc, { color: colors.muted }]}>{result.message}</Text>
+          </View>
+        ))}
         <TouchableOpacity
           onPress={handleSave}
           disabled={saving}

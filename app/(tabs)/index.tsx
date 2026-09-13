@@ -122,7 +122,11 @@ function genReducer(state: GenState, action: GenAction): GenState {
       return { ...state, ...action.payload };
     case "SET_MODEL": {
       const m = action.model;
-      const updates: Partial<GenState> = { model: m };
+      const updates: Partial<GenState> = {
+        model: m,
+        civitaiOverride: "",
+        civitaiModelInput: "",
+      };
       if (m.defaultCfg) updates.cfg = m.defaultCfg;
       if (m.defaultSteps) updates.steps = m.defaultSteps;
       if (m.defaultClipSkip) updates.clipSkip = m.defaultClipSkip;
@@ -463,6 +467,10 @@ export default function StudioScreen() {
                       <TouchableOpacity
                         key={model.id}
                         onPress={() => {
+                          if (model.unavailableReason) {
+                            showToast(model.unavailableReason, "error");
+                            return;
+                          }
                           dispatch({ type: "SET_MODEL", model });
                           setShowModelPicker(false);
                           setExpandedEcosystem(null);
@@ -482,7 +490,7 @@ export default function StudioScreen() {
                           {model.name}
                         </Text>
                         <Text style={[styles.accordionItemBadge, { color: colors.muted }]}>
-                          {model.provider === "replicate" ? "API" : model.provider === "google" ? "API" : "RunPod"}
+                          {model.unavailableReason ? "Unavailable" : model.provider === "runpod" ? "RunPod" : "API"}
                         </Text>
                       </TouchableOpacity>
                     ))}

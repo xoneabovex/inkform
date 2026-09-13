@@ -21,6 +21,7 @@ export interface ModelInfo {
   architecture: ModelArchitecture;
   ecosystem: string; // Accordion group name
   replicateId?: string;
+  unavailableReason?: string;
 
   // Feature flags
   supportsNegativePrompt: boolean;
@@ -43,7 +44,7 @@ export interface ModelInfo {
 
   // Civitai integration
   useLegacyCivitaiLoader?: boolean; // Phase 3: use existing manual Civitai UI
-  defaultCivitaiModelId?: string;   // Phase 4: auto-populate for auto-routing
+  defaultCivitaiModelId?: string; // Phase 4: auto-populate for auto-routing
 
   extraParams?: Record<string, any>;
 }
@@ -61,7 +62,7 @@ function rpModel(
   name: string,
   ecosystem: string,
   arch: ModelArchitecture,
-  overrides: Partial<ModelInfo> = {}
+  overrides: Partial<ModelInfo> = {},
 ): ModelInfo {
   const base: ModelInfo = {
     id,
@@ -69,7 +70,8 @@ function rpModel(
     provider: "runpod",
     architecture: arch,
     ecosystem,
-    supportsNegativePrompt: arch === "sdxl" || arch === "sd15" || arch === "other",
+    supportsNegativePrompt:
+      arch === "sdxl" || arch === "sd15" || arch === "other",
     supportsCfg: arch !== "api",
     supportsSteps: arch !== "api",
     supportsLoRAs: arch !== "api",
@@ -95,7 +97,7 @@ function repModel(
   ecosystem: string,
   replicateId: string,
   arch: ModelArchitecture,
-  overrides: Partial<ModelInfo> = {}
+  overrides: Partial<ModelInfo> = {},
 ): ModelInfo {
   const base: ModelInfo = {
     id,
@@ -122,7 +124,7 @@ function repModel(
 function gModel(
   id: string,
   name: string,
-  overrides: Partial<ModelInfo> = {}
+  overrides: Partial<ModelInfo> = {},
 ): ModelInfo {
   const base: ModelInfo = {
     id,
@@ -150,80 +152,170 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
   {
     name: "BYTEDANCE",
     models: [
-      repModel("seedream", "Seedream 3", "BYTEDANCE", "bytedance/seedream-3", "api", {
-        supportsCfg: true,
-        cfgRange: [1, 10],
-        defaultCfg: 2.5,
-      }),
+      repModel(
+        "seedream",
+        "Seedream 5.0 Lite",
+        "BYTEDANCE",
+        "bytedance/seedream-5-lite",
+        "api",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 1,
+        },
+      ),
     ],
   },
   {
     name: "FLUX",
     models: [
-      repModel("flux-1-schnell", "Flux.1 Schnell", "FLUX", "black-forest-labs/flux-schnell", "flux"),
-      repModel("flux-1-krea", "Flux.1 Krea Dev", "FLUX", "black-forest-labs/flux-krea-dev", "flux", {
-        supportsCfg: true,
-        supportsSteps: true,
-        supportsImg2Img: true,
-        supportsDenoisingStrength: true,
-        cfgRange: [1, 10],
-        stepsRange: [1, 50],
-        defaultCfg: 3.5,
-        defaultSteps: 28,
-        maxRefImages: 1,
-      }),
-      repModel("flux-1-kontext", "Flux.1 Kontext Max", "FLUX", "black-forest-labs/flux-kontext-max", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 1,
-      }),
-      repModel("flux-1.1-pro", "Flux 1.1 Pro", "FLUX", "black-forest-labs/flux-1.1-pro", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 1,
-      }),
-      repModel("flux-2-dev", "Flux.2 Dev", "FLUX", "black-forest-labs/flux-2-dev", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 5,
-      }),
-      repModel("flux-2-pro", "Flux.2 Pro", "FLUX", "black-forest-labs/flux-2-pro", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 8,
-      }),
-      repModel("flux-2-max", "Flux.2 Max", "FLUX", "black-forest-labs/flux-2-max", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 8,
-      }),
-      repModel("flux-2-klein", "Flux.2 Klein", "FLUX", "black-forest-labs/flux-2-klein-4b", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 5,
-      }),
+      repModel(
+        "flux-1-schnell",
+        "Flux.1 Schnell",
+        "FLUX",
+        "black-forest-labs/flux-schnell",
+        "flux",
+      ),
+      repModel(
+        "flux-1-krea",
+        "Flux.1 Krea Dev",
+        "FLUX",
+        "black-forest-labs/flux-krea-dev",
+        "flux",
+        {
+          supportsCfg: true,
+          supportsSteps: true,
+          supportsImg2Img: true,
+          supportsDenoisingStrength: true,
+          cfgRange: [1, 10],
+          stepsRange: [1, 50],
+          defaultCfg: 3.5,
+          defaultSteps: 28,
+          maxRefImages: 1,
+        },
+      ),
+      repModel(
+        "flux-1-kontext",
+        "Flux.1 Kontext Max",
+        "FLUX",
+        "black-forest-labs/flux-kontext-max",
+        "flux",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 1,
+        },
+      ),
+      repModel(
+        "flux-1.1-pro",
+        "Flux 1.1 Pro",
+        "FLUX",
+        "black-forest-labs/flux-1.1-pro",
+        "flux",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 1,
+        },
+      ),
+      repModel(
+        "flux-2-dev",
+        "Flux.2 Dev",
+        "FLUX",
+        "black-forest-labs/flux-2-dev",
+        "flux",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 5,
+        },
+      ),
+      repModel(
+        "flux-2-pro",
+        "Flux.2 Pro",
+        "FLUX",
+        "black-forest-labs/flux-2-pro",
+        "flux",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 8,
+        },
+      ),
+      repModel(
+        "flux-2-max",
+        "Flux.2 Max",
+        "FLUX",
+        "black-forest-labs/flux-2-max",
+        "flux",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 8,
+        },
+      ),
+      repModel(
+        "flux-2-klein",
+        "Flux.2 Klein",
+        "FLUX",
+        "black-forest-labs/flux-2-klein-4b",
+        "flux",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 5,
+        },
+      ),
       // RunPod FLUX variants (for Civitai auto-routing)
       rpModel("rp-flux-1", "Flux.1 (Civitai)", "FLUX", "flux", {
         supportsNegativePrompt: false,
         supportsClipSkip: false,
         supportsVae: false,
         supportsHiResFix: false,
-        defaultCivitaiModelId: "618692", // FLUX.1 Dev on Civitai
+        unavailableReason:
+          "The current RunPod worker supports SD 1.x and SDXL only. Choose a hosted FLUX model above.",
       }),
     ],
   },
   {
     name: "GOOGLE",
     models: [
-      gModel("imagen-4", "Imagen 4"),
-      gModel("imagen-4-ultra", "Imagen 4 Ultra", { extraParams: { maxBatch: 1 } }),
-      gModel("imagen-4-fast", "Imagen 4 Fast"),
-      gModel("gemini-3-flash-image", "Nano Banana (3.1 Flash)"),
-      gModel("gemini-3-pro-image", "Nano Banana (3 Pro)", { extraParams: { maxBatch: 1 } }),
-      gModel("gemini-2.5-flash-image", "Nano Banana (2.5 Flash)"),
+      gModel("gemini-3-flash-image", "Nano Banana 2", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
+      gModel("gemini-3-pro-image", "Nano Banana Pro", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
+      gModel("gemini-3.1-flash-lite-image", "Nano Banana 2 Lite", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
+      gModel("gemini-2.5-flash-image", "Nano Banana (2.5 Flash)", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
     ],
   },
   {
     name: "OPENAI",
     models: [
-      repModel("openai-gpt-image", "GPT Image 1", "OPENAI", "openai/gpt-image-1", "api", {
-        supportsImg2Img: true,
-        maxRefImages: 4,
-      }),
+      repModel(
+        "openai-gpt-image",
+        "GPT Image 2.5 Flare",
+        "OPENAI",
+        "openai/gpt-image-2.5-flare",
+        "api",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 1,
+        },
+      ),
+      repModel(
+        "openai-gpt-image-sunburst",
+        "GPT Image 2.5 Sunburst",
+        "OPENAI",
+        "openai/gpt-image-2.5-sunburst",
+        "api",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 1,
+        },
+      ),
     ],
   },
   {
@@ -235,24 +327,33 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
       }),
       rpModel("rp-pony-v7", "Pony Diffusion V7", "PONY DIFFUSION", "sdxl", {
         useLegacyCivitaiLoader: true,
-        defaultCivitaiModelId: "1268539",
+        unavailableReason:
+          "The previous Pony V7 checkpoint ID is unavailable. Use Pony V6 or supply a verified compatible checkpoint with the custom loader.",
       }),
     ],
   },
   {
     name: "QWEN",
     models: [
-      repModel("qwen", "Qwen Image", "QWEN", "qwen/qwen-image", "api", {
-        supportsCfg: true,
-        supportsSteps: true,
-        supportsImg2Img: true,
-        supportsDenoisingStrength: true,
-        cfgRange: [0, 10],
-        stepsRange: [1, 50],
-        defaultCfg: 2.5,
-        defaultSteps: 30,
-        maxRefImages: 1,
-      }),
+      repModel(
+        "qwen",
+        "Qwen Image 2512",
+        "QWEN",
+        "qwen/qwen-image-2512",
+        "api",
+        {
+          supportsNegativePrompt: true,
+          supportsCfg: true,
+          supportsSteps: true,
+          supportsImg2Img: true,
+          supportsDenoisingStrength: true,
+          cfgRange: [0, 10],
+          stepsRange: [20, 50],
+          defaultCfg: 4,
+          defaultSteps: 40,
+          maxRefImages: 1,
+        },
+      ),
     ],
   },
   {
@@ -262,38 +363,45 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
         useLegacyCivitaiLoader: true,
         defaultCivitaiModelId: "889818",
       }),
-      rpModel("rp-noobai", "NoobAI", "SDXL COMMUNITY", "sdxl", {
+      rpModel("rp-noobai", "NoobAI XL Epsilon 1.1", "SDXL COMMUNITY", "sdxl", {
         useLegacyCivitaiLoader: true,
-        defaultCivitaiModelId: "833294",
+        defaultCivitaiModelId: "1116447",
       }),
     ],
   },
   {
     name: "STABLE DIFFUSION",
     models: [
-      rpModel("rp-sd15", "Stable Diffusion 1.x", "STABLE DIFFUSION", "sd15", {
+      rpModel("rp-sd15", "DreamShaper 8 (SD 1.5)", "STABLE DIFFUSION", "sd15", {
         defaultCivitaiModelId: "128713",
       }),
       rpModel("rp-sdxl", "Stable Diffusion XL", "STABLE DIFFUSION", "sdxl", {
         useLegacyCivitaiLoader: true,
-        defaultCivitaiModelId: "101055",
       }),
     ],
   },
   {
     name: "XAI",
     models: [
-      repModel("grok-image", "Grok Imagine Image 2", "XAI", "xai/grok-imagine-image-2", "api", {
-        supportsImg2Img: true,
-        maxRefImages: 1,
-      }),
+      repModel(
+        "grok-image",
+        "Grok Imagine Image 2",
+        "XAI",
+        "xai/grok-imagine-image-2",
+        "api",
+        {
+          supportsImg2Img: true,
+          maxRefImages: 1,
+        },
+      ),
     ],
   },
   {
     name: "ZIMAGE",
     models: [
       rpModel("rp-zimage", "ZImage", "ZIMAGE", "other", {
-        defaultCivitaiModelId: "1076277",
+        unavailableReason:
+          "Z-Image requires a dedicated pipeline that is not installed in this RunPod worker.",
         supportsLoRAs: true,
       }),
     ],
@@ -302,11 +410,13 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
     name: "OTHER",
     models: [
       rpModel("rp-chroma", "Chroma", "OTHER", "other", {
-        defaultCivitaiModelId: "1175869",
+        unavailableReason:
+          "Chroma requires a dedicated pipeline that is not installed in this RunPod worker.",
         supportsLoRAs: true,
       }),
       rpModel("rp-hidream", "HiDream", "OTHER", "other", {
-        defaultCivitaiModelId: "1120418",
+        unavailableReason:
+          "HiDream requires a dedicated pipeline that is not installed in this RunPod worker.",
         supportsLoRAs: false,
       }),
     ],
@@ -318,7 +428,13 @@ export const ALL_MODELS: ModelInfo[] = MODEL_CATALOG.flatMap((g) => g.models);
 
 // Get model by ID
 export function getModelById(id: string): ModelInfo | undefined {
-  return ALL_MODELS.find((m) => m.id === id);
+  // Preserve saved Imagen prompts/settings after Google's August 2026 retirement.
+  const aliases: Record<string, string> = {
+    "imagen-4": "gemini-3-flash-image",
+    "imagen-4-fast": "gemini-3.1-flash-lite-image",
+    "imagen-4-ultra": "gemini-3-pro-image",
+  };
+  return ALL_MODELS.find((m) => m.id === (aliases[id] ?? id));
 }
 
 // ===== Sampling Methods =====
@@ -371,13 +487,43 @@ export interface AspectRatio {
 
 export const ASPECT_RATIOS: AspectRatio[] = [
   { label: "1:1", value: "1:1", width: 1024, height: 1024, category: "Square" },
-  { label: "4:3", value: "4:3", width: 1024, height: 768, category: "Standard" },
-  { label: "3:4", value: "3:4", width: 768, height: 1024, category: "Standard" },
+  {
+    label: "4:3",
+    value: "4:3",
+    width: 1024,
+    height: 768,
+    category: "Standard",
+  },
+  {
+    label: "3:4",
+    value: "3:4",
+    width: 768,
+    height: 1024,
+    category: "Standard",
+  },
   { label: "3:2", value: "3:2", width: 1024, height: 683, category: "Photo" },
   { label: "2:3", value: "2:3", width: 683, height: 1024, category: "Photo" },
-  { label: "16:9", value: "16:9", width: 1024, height: 576, category: "Cinema" },
-  { label: "21:9", value: "21:9", width: 1024, height: 439, category: "Cinema" },
-  { label: "9:16", value: "9:16", width: 576, height: 1024, category: "Mobile" },
+  {
+    label: "16:9",
+    value: "16:9",
+    width: 1024,
+    height: 576,
+    category: "Cinema",
+  },
+  {
+    label: "21:9",
+    value: "21:9",
+    width: 1024,
+    height: 439,
+    category: "Cinema",
+  },
+  {
+    label: "9:16",
+    value: "9:16",
+    width: 576,
+    height: 1024,
+    category: "Mobile",
+  },
 ];
 
 // ===== Civitai Types =====
@@ -437,7 +583,9 @@ export interface GenerationStylePreset {
   name: string;
   description?: string;
   modelId: string;
-  config: Partial<Omit<GenerationRequest, 'prompt' | 'negativePrompt' | 'referenceImageUri'>>;
+  config: Partial<
+    Omit<GenerationRequest, "prompt" | "negativePrompt" | "referenceImageUri">
+  >;
   negativePromptAppend?: string;
 }
 

@@ -23,7 +23,7 @@
 
 ### Studio (Generate Tab)
 
-- **Multi-provider generation** — Replicate (FLUX.2, FLUX.1, Qwen Image, Grok Imagine, Seedream, and GPT Image 1), Google (Imagen 4 and Gemini image models), and custom RunPod endpoints
+- **Multi-provider generation** — Replicate (FLUX.2, FLUX.1, Qwen Image 2512, Grok Imagine Image 2, Seedream 5.0 Lite, and GPT Image 2.5), Google (Nano Banana image models), and custom RunPod endpoints
 - **Batch generation** — generate up to 4 images simultaneously with parallel predictions
 - **Advanced parameters** — CFG scale, steps, seed, sampling method (Euler, DPM++ 2M Karras, DDIM, LCM, and more), CLIP skip, VAE selector, Hi-Res Fix
 - **LoRA support** — load multiple LoRAs from Civitai with individual weight sliders and trigger word display
@@ -112,7 +112,7 @@ pnpm test
 
 ### Building an Android APK
 
-Open the repository's **Actions** tab, select **Android APK**, and choose **Run workflow**. When the build finishes, download the `inkform-android-debug-*` artifact from the workflow run and unzip it to get an installable `app-debug.apk`.
+Open the repository's **Actions** tab, select **Android APK**, and choose **Run workflow**. When the build finishes, download the `inkform-android-standalone-*` artifact from the workflow run and unzip it to get an installable `app-release.apk`.
 
 The same workflow builds every pull request that changes the app or its native configuration, so broken native builds are caught before merge.
 
@@ -125,11 +125,11 @@ Inkform connects to external AI providers. You will need at least one of the fol
 | Provider      | Where to get it                                                                | Required for                       |
 | ------------- | ------------------------------------------------------------------------------ | ---------------------------------- |
 | **Replicate** | [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens)   | FLUX models                        |
-| **OpenAI**    | [platform.openai.com/api-keys](https://platform.openai.com/api-keys)           | GPT Image 1 through Replicate only |
-| **Google AI** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey)               | Imagen 3/4, Gemini Image models    |
+| **OpenAI**    | [platform.openai.com/api-keys](https://platform.openai.com/api-keys)           | Optional: own billing for GPT Image 2.5 |
+| **Google AI** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey)               | Nano Banana image models    |
 | **RunPod**    | [runpod.io/console/user/settings](https://www.runpod.io/console/user/settings) | Custom RunPod endpoint (optional)  |
 
-Enter your keys in the **Settings** tab of the app. Keys are stored securely on-device using Expo SecureStore and are never transmitted anywhere other than the respective provider APIs.
+Enter your keys in **Settings** and tap **Test API Connections** for read-only authentication checks. These checks do not generate images, load credits, or verify billing. Save Settings to persist changes. Android keys use Expo SecureStore. Generation sends your OpenAI key to the Replicate wrapper only if supplied, and your Civitai token to your RunPod worker for authenticated downloads.
 
 ---
 

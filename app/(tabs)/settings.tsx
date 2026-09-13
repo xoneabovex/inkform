@@ -133,6 +133,8 @@ export default function SettingsScreen() {
         await saveApiKey("replicateApiToken", keys.replicateApiToken);
       if (keys.googleApiKey !== undefined)
         await saveApiKey("googleApiKey", keys.googleApiKey);
+      if (keys.openaiApiKey !== undefined)
+        await saveApiKey("openaiApiKey", keys.openaiApiKey);
       if (keys.runpodApiKey !== undefined)
         await saveApiKey("runpodApiKey", keys.runpodApiKey);
       if (keys.runpodEndpointId !== undefined)
@@ -221,6 +223,22 @@ export default function SettingsScreen() {
             value={keys.replicateApiToken || ""}
             onChangeText={(t) => setKeys((k) => ({ ...k, replicateApiToken: t }))}
             placeholder="r8_..."
+            colors={colors}
+          />
+        </View>
+
+        {/* OpenAI */}
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>OpenAI</Text>
+          <Text style={[styles.sectionDesc, { color: colors.muted }]}>
+            Required only for GPT Image 1. Replicate hosts the model wrapper, but the model also requires your OpenAI API key.
+          </Text>
+          <SecureInput
+            label="API KEY"
+            hint="Get yours at platform.openai.com/api-keys"
+            value={keys.openaiApiKey || ""}
+            onChangeText={(t) => setKeys((k) => ({ ...k, openaiApiKey: t }))}
+            placeholder="sk-..."
             colors={colors}
           />
         </View>

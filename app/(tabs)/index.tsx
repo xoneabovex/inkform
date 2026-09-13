@@ -338,7 +338,10 @@ export default function StudioScreen() {
         loraEntries: state.model.supportsLoRAs && loraEntries.length > 0 ? loraEntries : undefined,
         civitaiModelId: civitaiId,
         referenceImageUri: state.model.supportsImg2Img && state.referenceImage ? state.referenceImage : undefined,
-        denoisingStrength: state.referenceImage ? state.denoisingStrength : undefined,
+        denoisingStrength:
+          state.referenceImage && state.model.supportsDenoisingStrength
+            ? state.denoisingStrength
+            : undefined,
       };
 
       const images = await generateImages(req, setGenStatus);
@@ -523,7 +526,7 @@ export default function StudioScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            {state.referenceImage && (
+            {state.referenceImage && state.model.supportsDenoisingStrength && (
               <>
                 <View style={styles.sliderRow}>
                   <Text style={[styles.advLabel, { color: colors.muted }]}>Denoising Strength</Text>

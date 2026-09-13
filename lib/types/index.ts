@@ -28,6 +28,7 @@ export interface ModelInfo {
   supportsSteps: boolean;
   supportsLoRAs: boolean;
   supportsImg2Img: boolean;
+  supportsDenoisingStrength: boolean;
   supportsClipSkip: boolean;
   supportsVae: boolean;
   supportsHiResFix: boolean;
@@ -73,6 +74,7 @@ function rpModel(
     supportsSteps: arch !== "api",
     supportsLoRAs: arch !== "api",
     supportsImg2Img: true,
+    supportsDenoisingStrength: true,
     supportsClipSkip: arch === "sdxl" || arch === "sd15",
     supportsVae: arch === "sdxl" || arch === "sd15",
     supportsHiResFix: arch === "sdxl" || arch === "sd15",
@@ -107,6 +109,7 @@ function repModel(
     supportsSteps: false,
     supportsLoRAs: false,
     supportsImg2Img: false,
+    supportsDenoisingStrength: false,
     supportsClipSkip: false,
     supportsVae: false,
     supportsHiResFix: false,
@@ -132,6 +135,7 @@ function gModel(
     supportsSteps: false,
     supportsLoRAs: false,
     supportsImg2Img: false,
+    supportsDenoisingStrength: false,
     supportsClipSkip: false,
     supportsVae: false,
     supportsHiResFix: false,
@@ -146,34 +150,52 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
   {
     name: "BYTEDANCE",
     models: [
-      repModel("seedream", "Seedream", "BYTEDANCE", "bytedance/seedream-3", "api"),
+      repModel("seedream", "Seedream 3", "BYTEDANCE", "bytedance/seedream-3", "api", {
+        supportsCfg: true,
+        cfgRange: [1, 10],
+        defaultCfg: 2.5,
+      }),
     ],
   },
   {
     name: "FLUX",
     models: [
       repModel("flux-1-schnell", "Flux.1 Schnell", "FLUX", "black-forest-labs/flux-schnell", "flux"),
-      repModel("flux-1-krea", "Flux.1 Krea", "FLUX", "lucataco/flux-krea-ai", "flux"),
-      repModel("flux-1-kontext", "Flux.1 Kontext", "FLUX", "black-forest-labs/flux-1-kontext-max", "flux", {
-        supportsImg2Img: true,
-        maxRefImages: 1,
-      }),
-      repModel("flux-1.1-pro", "Flux 1.1 Pro", "FLUX", "black-forest-labs/flux-1.1-pro", "flux"),
-      repModel("flux-2-dev", "Flux.2 Dev", "FLUX", "black-forest-labs/flux-2-dev", "flux", {
+      repModel("flux-1-krea", "Flux.1 Krea Dev", "FLUX", "black-forest-labs/flux-krea-dev", "flux", {
         supportsCfg: true,
         supportsSteps: true,
-        cfgRange: [1, 20],
+        supportsImg2Img: true,
+        supportsDenoisingStrength: true,
+        cfgRange: [1, 10],
         stepsRange: [1, 50],
         defaultCfg: 3.5,
         defaultSteps: 28,
+        maxRefImages: 1,
+      }),
+      repModel("flux-1-kontext", "Flux.1 Kontext Max", "FLUX", "black-forest-labs/flux-kontext-max", "flux", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
+      repModel("flux-1.1-pro", "Flux 1.1 Pro", "FLUX", "black-forest-labs/flux-1.1-pro", "flux", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
+      repModel("flux-2-dev", "Flux.2 Dev", "FLUX", "black-forest-labs/flux-2-dev", "flux", {
+        supportsImg2Img: true,
+        maxRefImages: 5,
       }),
       repModel("flux-2-pro", "Flux.2 Pro", "FLUX", "black-forest-labs/flux-2-pro", "flux", {
-        supportsSteps: true,
-        stepsRange: [1, 50],
-        defaultSteps: 25,
+        supportsImg2Img: true,
+        maxRefImages: 8,
       }),
-      repModel("flux-2-max", "Flux.2 Max", "FLUX", "black-forest-labs/flux-2-max", "flux"),
-      repModel("flux-2-klein", "Flux.2 Klein", "FLUX", "black-forest-labs/flux-2-klein-4b", "flux"),
+      repModel("flux-2-max", "Flux.2 Max", "FLUX", "black-forest-labs/flux-2-max", "flux", {
+        supportsImg2Img: true,
+        maxRefImages: 8,
+      }),
+      repModel("flux-2-klein", "Flux.2 Klein", "FLUX", "black-forest-labs/flux-2-klein-4b", "flux", {
+        supportsImg2Img: true,
+        maxRefImages: 5,
+      }),
       // RunPod FLUX variants (for Civitai auto-routing)
       rpModel("rp-flux-1", "Flux.1 (Civitai)", "FLUX", "flux", {
         supportsNegativePrompt: false,
@@ -198,7 +220,10 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
   {
     name: "OPENAI",
     models: [
-      repModel("openai-gpt-image", "GPT Image 1", "OPENAI", "openai/gpt-image-1", "api"),
+      repModel("openai-gpt-image", "GPT Image 1", "OPENAI", "openai/gpt-image-1", "api", {
+        supportsImg2Img: true,
+        maxRefImages: 4,
+      }),
     ],
   },
   {
@@ -217,7 +242,17 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
   {
     name: "QWEN",
     models: [
-      repModel("qwen", "Qwen", "QWEN", "qwen-ai/qwen2.5-vl-7b-instruct", "api"),
+      repModel("qwen", "Qwen Image", "QWEN", "qwen/qwen-image", "api", {
+        supportsCfg: true,
+        supportsSteps: true,
+        supportsImg2Img: true,
+        supportsDenoisingStrength: true,
+        cfgRange: [0, 10],
+        stepsRange: [1, 50],
+        defaultCfg: 2.5,
+        defaultSteps: 30,
+        maxRefImages: 1,
+      }),
     ],
   },
   {
@@ -248,7 +283,10 @@ export const MODEL_CATALOG: EcosystemGroup[] = [
   {
     name: "XAI",
     models: [
-      repModel("grok-image", "Grok", "XAI", "x-ai/grok-2-image", "api"),
+      repModel("grok-image", "Grok Imagine Image 2", "XAI", "xai/grok-imagine-image-2", "api", {
+        supportsImg2Img: true,
+        maxRefImages: 1,
+      }),
     ],
   },
   {
@@ -455,4 +493,5 @@ export interface ApiKeys {
   civitaiApiToken?: string;
   replicateApiToken?: string;
   googleApiKey?: string;
+  openaiApiKey?: string;
 }

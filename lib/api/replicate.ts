@@ -18,6 +18,8 @@ const NATIVE_BATCH_FIELDS: Record<string, "num_outputs" | "number_of_images"> =
     "black-forest-labs/flux-schnell": "num_outputs",
     "black-forest-labs/flux-krea-dev": "num_outputs",
     "openai/gpt-image-1": "number_of_images",
+    "openai/gpt-image-2.5-flare": "number_of_images",
+    "openai/gpt-image-2.5-sunburst": "number_of_images",
   };
 
 const SINGLE_IMAGE_FIELDS: Record<
@@ -27,11 +29,17 @@ const SINGLE_IMAGE_FIELDS: Record<
   "black-forest-labs/flux-krea-dev": "image",
   "black-forest-labs/flux-kontext-max": "input_image",
   "black-forest-labs/flux-1.1-pro": "image_prompt",
-  "qwen/qwen-image": "image",
+  "qwen/qwen-image-2512": "image",
   "xai/grok-imagine-image-2": "image",
 };
 
-const MULTI_IMAGE_FIELDS: Record<string, "images" | "input_images"> = {
+const MULTI_IMAGE_FIELDS: Record<
+  string,
+  "images" | "input_images" | "image_input"
+> = {
+  "bytedance/seedream-5-lite": "image_input",
+  "openai/gpt-image-2.5-flare": "input_images",
+  "openai/gpt-image-2.5-sunburst": "input_images",
   "black-forest-labs/flux-2-klein-4b": "images",
   "black-forest-labs/flux-2-dev": "input_images",
   "black-forest-labs/flux-2-pro": "input_images",
@@ -42,22 +50,40 @@ const MULTI_IMAGE_FIELDS: Record<string, "images" | "input_images"> = {
 const CFG_FIELDS: Record<string, "guidance" | "guidance_scale"> = {
   "bytedance/seedream-3": "guidance_scale",
   "black-forest-labs/flux-krea-dev": "guidance",
-  "qwen/qwen-image": "guidance",
+  "qwen/qwen-image-2512": "guidance",
 };
 
 const STEP_MODELS = new Set([
   "black-forest-labs/flux-krea-dev",
-  "qwen/qwen-image",
+  "qwen/qwen-image-2512",
 ]);
 
 const DENOISING_FIELDS: Record<string, "prompt_strength" | "strength"> = {
   "black-forest-labs/flux-krea-dev": "prompt_strength",
-  "qwen/qwen-image": "strength",
+  "qwen/qwen-image-2512": "strength",
 };
 
 const MODEL_ASPECT_RATIOS: Record<string, Set<string>> = {
   "openai/gpt-image-1": new Set(["1:1", "3:2", "2:3"]),
-  "qwen/qwen-image": new Set([
+  "openai/gpt-image-2.5-flare": new Set([
+    "1:1",
+    "3:2",
+    "2:3",
+    "4:3",
+    "3:4",
+    "16:9",
+    "9:16",
+  ]),
+  "openai/gpt-image-2.5-sunburst": new Set([
+    "1:1",
+    "3:2",
+    "2:3",
+    "4:3",
+    "3:4",
+    "16:9",
+    "9:16",
+  ]),
+  "qwen/qwen-image-2512": new Set([
     "1:1",
     "16:9",
     "9:16",
@@ -153,17 +179,28 @@ export function buildReplicateInput(
     req.steps !== undefined &&
     req.model.supportsSteps
   ) {
-    input.num_inference_steps = req.steps;
+    const minimum = req.model.stepsRange?.[0] ?? 1;
+    const maximum = req.model.stepsRange?.[1] ?? 50;
+    input.num_inference_steps = Math.max(minimum, Math.min(maximum, req.steps));
   }
 
   // Seed
-  if (req.seed !== undefined && req.seed !== -1) {
+  if (
+    req.seed !== undefined &&
+    req.seed !== -1 &&
+    !modelId.startsWith("openai/") &&
+    !modelId.startsWith("xai/") &&
+    modelId !== "bytedance/seedream-5-lite"
+  ) {
     input.seed = req.seed;
   }
 
   const batchField = NATIVE_BATCH_FIELDS[modelId];
   if (batchField && req.batchSize > 1) {
-    input[batchField] = req.batchSize;
+    input[batchField] = Math.min(
+      req.batchSize,
+      batchField === "num_outputs" ? 4 : 10,
+    );
   }
 
   if (req.referenceImageUri) {
@@ -183,7 +220,7 @@ export function buildReplicateInput(
     }
   }
 
-  if (modelId === "openai/gpt-image-1" && secrets.openaiApiKey) {
+  if (modelId.startsWith("openai/") && secrets.openaiApiKey) {
     input.openai_api_key = secrets.openaiApiKey;
   }
 
@@ -347,11 +384,15 @@ export async function upscaleWithReplicate(
   faceEnhance: boolean,
   onProgress?: (status: string) => void,
 ): Promise<string> {
-  const modelId =
-    model === "real-esrgan" ? "nightmareai/real-esrgan" : "tencentarc/gfpgan";
+  // Community models use version-based predictions, not the official-model route.
+  const version =
+    model === "real-esrgan"
+      ? "b3ef194191d13140337468c916c2c5b96dd0cb06dffc032a022a31807f6a5ea8"
+      : "0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c";
 
   const input: Record<string, any> = {
-    image: imageUrl,
+    [model === "real-esrgan" ? "image" : "img"]: imageUrl,
+    scale: scaleFactor,
   };
 
   if (model === "real-esrgan") {
@@ -359,18 +400,15 @@ export async function upscaleWithReplicate(
     input.face_enhance = faceEnhance;
   }
 
-  const response = await fetch(
-    `${REPLICATE_API}/models/${modelId}/predictions`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Prefer: "wait",
-      },
-      body: JSON.stringify({ input }),
+  const response = await fetch(`${REPLICATE_API}/predictions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Prefer: "wait",
     },
-  );
+    body: JSON.stringify({ version, input }),
+  });
 
   if (!response.ok) {
     const err = await response.text();

@@ -1,0 +1,249 @@
+{
+  "bytedance/seedream-3": {
+    "fields": [
+      "seed",
+      "size",
+      "width",
+      "height",
+      "prompt",
+      "aspect_ratio",
+      "guidance_scale"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-schnell": {
+    "fields": [
+      "seed",
+      "prompt",
+      "go_fast",
+      "megapixels",
+      "num_outputs",
+      "aspect_ratio",
+      "output_format",
+      "output_quality",
+      "num_inference_steps",
+      "disable_safety_checker"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-krea-dev": {
+    "fields": [
+      "seed",
+      "image",
+      "prompt",
+      "go_fast",
+      "guidance",
+      "megapixels",
+      "num_outputs",
+      "aspect_ratio",
+      "output_format",
+      "output_quality",
+      "prompt_strength",
+      "num_inference_steps",
+      "disable_safety_checker"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-kontext-max": {
+    "fields": [
+      "seed",
+      "prompt",
+      "input_image",
+      "aspect_ratio",
+      "output_format",
+      "safety_tolerance",
+      "prompt_upsampling"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-1.1-pro": {
+    "fields": [
+      "seed",
+      "width",
+      "height",
+      "prompt",
+      "aspect_ratio",
+      "image_prompt",
+      "output_format",
+      "output_quality",
+      "safety_tolerance",
+      "prompt_upsampling"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-2-dev": {
+    "fields": [
+      "seed",
+      "width",
+      "height",
+      "prompt",
+      "go_fast",
+      "aspect_ratio",
+      "input_images",
+      "output_format",
+      "output_quality",
+      "disable_safety_checker"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-2-pro": {
+    "fields": [
+      "seed",
+      "width",
+      "height",
+      "prompt",
+      "resolution",
+      "aspect_ratio",
+      "input_images",
+      "output_format",
+      "output_quality",
+      "safety_tolerance"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-2-max": {
+    "fields": [
+      "seed",
+      "width",
+      "height",
+      "prompt",
+      "resolution",
+      "aspect_ratio",
+      "input_images",
+      "output_format",
+      "output_quality",
+      "safety_tolerance"
+    ],
+    "required": ["prompt"]
+  },
+  "black-forest-labs/flux-2-klein-4b": {
+    "fields": [
+      "seed",
+      "images",
+      "prompt",
+      "go_fast",
+      "aspect_ratio",
+      "output_format",
+      "output_quality",
+      "output_megapixels",
+      "disable_safety_checker"
+    ],
+    "required": ["prompt"]
+  },
+  "openai/gpt-image-1": {
+    "fields": [
+      "prompt",
+      "quality",
+      "user_id",
+      "background",
+      "moderation",
+      "aspect_ratio",
+      "input_images",
+      "output_format",
+      "input_fidelity",
+      "openai_api_key",
+      "number_of_images",
+      "output_compression"
+    ],
+    "required": ["openai_api_key", "prompt"]
+  },
+  "qwen/qwen-image": {
+    "fields": [
+      "seed",
+      "image",
+      "prompt",
+      "go_fast",
+      "guidance",
+      "strength",
+      "image_size",
+      "lora_scale",
+      "aspect_ratio",
+      "lora_weights",
+      "output_format",
+      "enhance_prompt",
+      "output_quality",
+      "negative_prompt",
+      "extra_lora_scale",
+      "replicate_weights",
+      "extra_lora_weights",
+      "num_inference_steps",
+      "disable_safety_checker"
+    ],
+    "required": ["prompt"]
+  },
+  "xai/grok-imagine-image-2": {
+    "fields": ["image", "prompt", "quality", "resolution", "aspect_ratio"],
+    "required": ["prompt"]
+  },
+  "bytedance/seedream-5-lite": {
+    "fields": [
+      "size",
+      "prompt",
+      "max_images",
+      "image_input",
+      "aspect_ratio",
+      "output_format",
+      "sequential_image_generation"
+    ],
+    "required": ["prompt"]
+  },
+  "openai/gpt-image-2.5-flare": {
+    "fields": [
+      "prompt",
+      "quality",
+      "user_id",
+      "background",
+      "moderation",
+      "aspect_ratio",
+      "input_images",
+      "output_format",
+      "openai_api_key",
+      "number_of_images",
+      "output_compression"
+    ],
+    "required": ["prompt"]
+  },
+  "openai/gpt-image-2.5-sunburst": {
+    "fields": [
+      "prompt",
+      "quality",
+      "user_id",
+      "background",
+      "moderation",
+      "aspect_ratio",
+      "input_images",
+      "output_format",
+      "openai_api_key",
+      "number_of_images",
+      "output_compression"
+    ],
+    "required": ["prompt"]
+  },
+  "qwen/qwen-image-2512": {
+    "fields": [
+      "seed",
+      "image",
+      "width",
+      "height",
+      "prompt",
+      "go_fast",
+      "guidance",
+      "strength",
+      "aspect_ratio",
+      "output_format",
+      "output_quality",
+      "negative_prompt",
+      "num_inference_steps",
+      "disable_safety_checker"
+    ],
+    "required": ["prompt"]
+  },
+  "nightmareai/real-esrgan": {
+    "fields": ["image", "scale", "face_enhance"],
+    "required": ["image"]
+  },
+  "tencentarc/gfpgan": {
+    "fields": ["img", "scale", "version"],
+    "required": ["img"]
+  }
+}

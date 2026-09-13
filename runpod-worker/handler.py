@@ -135,9 +135,13 @@ def get_civitai_download_url(version_id: str, token: str) -> tuple[str, str]:
 
 
 def detect_is_xl(base_model: str) -> bool:
-    """Detect if a model is XL-based from its base model string."""
-    xl_keywords = ["xl", "sdxl", "pony", "illustrious", "noobai", "animagine xl", "flux"]
-    return any(kw in base_model.lower() for kw in xl_keywords)
+    """Reject incompatible architectures instead of loading them as SD 1.5/XL."""
+    name = base_model.strip().lower()
+    if name in {"sdxl 1.0", "sdxl 0.9", "sdxl turbo", "pony", "illustrious", "noobai"}:
+        return True
+    if name in {"sd 1.4", "sd 1.5", "sd 1.5 lcm", "sd 1.5 hyper"}:
+        return False
+    raise ValueError(f"Unsupported architecture: {base_model}. This worker supports SD 1.x and SDXL checkpoints only.")
 
 
 def download_civitai_file(version_id: str, token: str, is_lora: bool = False) -> tuple[Path, str]:
@@ -156,6 +160,8 @@ def download_civitai_file(version_id: str, token: str, is_lora: bool = False) ->
 
     print(f"[Cache Miss] Downloading {version_id} from Civitai...")
     download_url, base_model = get_civitai_download_url(version_id, token)
+    if not is_lora:
+        detect_is_xl(base_model)  # Reject before downloading a large incompatible file.
     meta_file.write_text(base_model)
 
     headers = {"Authorization": f"Bearer {token}"} if token else {}

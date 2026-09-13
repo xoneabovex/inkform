@@ -9,6 +9,7 @@ export async function generateImages(
   req: GenerationRequest,
   onProgress?: (status: string) => void,
 ): Promise<string[]> {
+  if (req.model.unavailableReason) throw new Error(req.model.unavailableReason);
   let preparedRequest = req;
   if (req.referenceImageUri) {
     onProgress?.("Preparing reference image...");
@@ -26,18 +27,11 @@ export async function generateImages(
           "Replicate API token not configured. Go to Settings to add it.",
         );
 
-      const openaiApiKey =
-        preparedRequest.model.replicateId === "openai/gpt-image-1"
-          ? await getApiKey("openaiApiKey")
-          : null;
-      if (
-        preparedRequest.model.replicateId === "openai/gpt-image-1" &&
-        !openaiApiKey
-      ) {
-        throw new Error(
-          "GPT Image 1 also requires an OpenAI API key. Add it in Settings.",
-        );
-      }
+      const openaiApiKey = preparedRequest.model.replicateId?.startsWith(
+        "openai/",
+      )
+        ? await getApiKey("openaiApiKey")
+        : null;
 
       return generateWithReplicate(token, preparedRequest, onProgress, {
         openaiApiKey: openaiApiKey || undefined,

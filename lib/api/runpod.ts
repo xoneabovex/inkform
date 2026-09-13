@@ -18,8 +18,9 @@ export async function generateWithRunPod(
   civitaiModelId?: string,
   civitaiLoraIds?: string[],
   civitaiToken?: string,
-  onProgress?: (status: string) => void
+  onProgress?: (status: string) => void,
 ): Promise<string[]> {
+  if (req.model.unavailableReason) throw new Error(req.model.unavailableReason);
   const input: Record<string, any> = {
     prompt: req.prompt,
     negative_prompt: req.negativePrompt || "",
@@ -31,14 +32,18 @@ export async function generateWithRunPod(
   };
 
   // Civitai model — prefer inline req.civitaiModelId, fallback to passed arg
-  const effectiveModelId = req.civitaiModelId || civitaiModelId;
+  const effectiveModelId =
+    req.civitaiModelId || civitaiModelId || req.model.defaultCivitaiModelId;
   if (effectiveModelId) {
     input.civitai_model_version_id = effectiveModelId;
   }
 
   // LoRAs — pass as [{id, weight}] objects matching the handler schema
   if (req.loraEntries && req.loraEntries.length > 0) {
-    input.civitai_loras = req.loraEntries.map((l) => ({ id: l.id, weight: l.weight }));
+    input.civitai_loras = req.loraEntries.map((l) => ({
+      id: l.id,
+      weight: l.weight,
+    }));
   } else if (civitaiLoraIds && civitaiLoraIds.length > 0) {
     input.civitai_loras = civitaiLoraIds.map((id) => ({ id, weight: 0.8 }));
   }
@@ -86,7 +91,7 @@ export async function generateWithRunPod(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ input }),
-    }
+    },
   );
 
   if (!runResponse.ok) {
@@ -101,7 +106,9 @@ export async function generateWithRunPod(
   }
 
   if (data.status === "FAILED") {
-    throw new Error(data.error || data.output?.error || "RunPod generation failed");
+    throw new Error(
+      data.error || data.output?.error || "RunPod generation failed",
+    );
   }
 
   // Poll for completion
@@ -112,7 +119,7 @@ async function pollRunPod(
   apiKey: string,
   endpointId: string,
   jobId: string,
-  onProgress?: (status: string) => void
+  onProgress?: (status: string) => void,
 ): Promise<string[]> {
   const maxAttempts = 180; // 6 minutes for cold boots
   const pollInterval = 2000;
@@ -127,7 +134,7 @@ async function pollRunPod(
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -142,7 +149,7 @@ async function pollRunPod(
 
     if (data.status === "FAILED") {
       throw new Error(
-        data.error || data.output?.error || "RunPod generation failed"
+        data.error || data.output?.error || "RunPod generation failed",
       );
     }
 

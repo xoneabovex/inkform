@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { buildReplicateInput } from "../api/replicate";
-import { ASPECT_RATIOS, getModelById, type GenerationRequest } from "../types";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildReplicateInput, upscaleWithReplicate } from "../api/replicate";
+import {
+  ALL_MODELS,
+  ASPECT_RATIOS,
+  getModelById,
+  type GenerationRequest,
+} from "../types";
+import schemas from "./replicate-schema-fields.json";
 
 function makeRequest(
   modelId: string,
@@ -27,7 +33,7 @@ describe("Replicate model routing", () => {
     expect(getModelById("flux-1-kontext")?.replicateId).toBe(
       "black-forest-labs/flux-kontext-max",
     );
-    expect(getModelById("qwen")?.replicateId).toBe("qwen/qwen-image");
+    expect(getModelById("qwen")?.replicateId).toBe("qwen/qwen-image-2512");
     expect(getModelById("grok-image")?.replicateId).toBe(
       "xai/grok-imagine-image-2",
     );
@@ -87,7 +93,7 @@ describe("Replicate model routing", () => {
     );
 
     expect(input).toMatchObject({
-      aspect_ratio: "3:2",
+      aspect_ratio: "16:9",
       number_of_images: 4,
       input_images: ["data:image/jpeg;base64,abc"],
       openai_api_key: "test-openai-key",
@@ -101,3 +107,68 @@ describe("Replicate model routing", () => {
     expect(input.num_outputs).toBeUndefined();
   });
 });
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("matches the provider's September 2026 input fields across every Replicate selection", () => {
+  for (const model of ALL_MODELS.filter((m) => m.provider === "replicate")) {
+    const schema = schemas[model.replicateId as keyof typeof schemas];
+    expect(schema, model.id).toBeDefined();
+    const input = buildReplicateInput(
+      makeRequest(model.id, {
+        seed: 42,
+        steps: 30,
+        cfg: 4,
+        batchSize: 4,
+        referenceImageUri: "data:image/png;base64,YWJj",
+        denoisingStrength: 0.5,
+      }),
+    );
+    for (const key of Object.keys(input))
+      expect(schema.fields, model.id).toContain(key);
+    for (const key of schema.required)
+      expect(input, model.id).toHaveProperty(key);
+  }
+});
+
+it("clamps old Qwen step settings to the new model minimum", () => {
+  expect(
+    buildReplicateInput(makeRequest("qwen", { steps: 4 })).num_inference_steps,
+  ).toBe(20);
+});
+
+it.each(["real-esrgan", "gfpgan"] as const)(
+  "uses the community prediction route for %s",
+  async (model) => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: "test",
+            status: "succeeded",
+            output: "https://example.com/upscaled.png",
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    expect(
+      await upscaleWithReplicate(
+        "test-token",
+        "https://example.com/input.png",
+        model,
+        2,
+        true,
+      ),
+    ).toBe("https://example.com/upscaled.png");
+    expect(fetcher.mock.calls[0][0]).toBe(
+      "https://api.replicate.com/v1/predictions",
+    );
+    const body = JSON.parse(fetcher.mock.calls[0][1].body);
+    expect(body.version).toMatch(/^[a-f0-9]{64}$/);
+    expect(body.input[model === "gfpgan" ? "img" : "image"]).toBe(
+      "https://example.com/input.png",
+    );
+    expect(body.input.scale).toBe(2);
+  },
+);
